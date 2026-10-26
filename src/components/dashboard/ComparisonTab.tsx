@@ -31,34 +31,38 @@ const GRAPH_DEFS: GraphDef[] = [
 ];
 
 export default function ComparisonTab() {
-  const { activePerson, currentMonth, txns, goals } = useFinance();
+  const { activePerson, currentMonth, txns, goals, authenticated } = useFinance();
   const person = PEOPLE[activePerson];
   const curTxs = txns[activePerson]?.[currentMonth] || [];
   const cur = useMemo(() => getMonthTotals(curTxs), [curTxs]);
   const curStatus = useMemo(() => buildStatusMap(cur), [cur]);
 
-  const prevMonth = currentMonth === "Sep 2026" ? "Aug 2026" : "Jul 2026";
-  const prev = pastMonths[activePerson]?.[prevMonth] || {
-    income: 0,
-    fixed: 0,
-    invest: 0,
-    savings: 0,
-    guilt: 0,
-    net: 0,
-  };
+  const emptySummary = { income: 0, fixed: 0, invest: 0, savings: 0, guilt: 0, net: 0 };
+  const curIdx = MONTHS.indexOf(currentMonth);
+  const prevMonth = curIdx >= 0 && curIdx < MONTHS.length - 1 ? MONTHS[curIdx + 1] : MONTHS[1] ?? MONTHS[0];
+  const prevTxs = txns[activePerson]?.[prevMonth] || [];
+  const prev = prevTxs.length > 0
+    ? getMonthTotals(prevTxs)
+    : authenticated
+      ? emptySummary
+      : pastMonths[activePerson]?.[prevMonth] || emptySummary;
   const prevNet = prev.income - (prev.fixed + prev.invest + prev.savings + prev.guilt);
   const netDiff = cur.net - prevNet;
 
   const monthData = useMemo(
     () =>
       MONTHS.map((m) => {
-        if (m === "Sep 2026") return { month: m, ...getMonthTotals(txns[activePerson]?.[m] || []) };
+        const list = txns[activePerson]?.[m] || [];
+        if (list.length > 0) return { month: m, ...getMonthTotals(list) };
+        // Authenticated users see empty bars when a month has no real txns —
+        // no seeded demo data. Only the unauthenticated landing demo keeps it.
+        if (authenticated) return { month: m, ...emptySummary };
         return {
           month: m,
-          ...(pastMonths[activePerson]?.[m] || { income: 0, fixed: 0, invest: 0, savings: 0, guilt: 0, net: 0 }),
+          ...(pastMonths[activePerson]?.[m] || emptySummary),
         };
       }),
-    [txns, activePerson],
+    [txns, activePerson, authenticated],
   );
   const orderedMonths = [...monthData].reverse();
 

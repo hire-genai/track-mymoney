@@ -17,14 +17,30 @@ export default function MonthsTab() {
     setCurrentMonth,
     goals,
     bothUploaded,
+    txns,
   } = useFinance();
   const savingsSubs = useMemo(() => getSavingsSubs(goals), [goals]);
   const [col1, col2] = getColumnGroups(savingsSubs);
 
+  // Show the rolling-recent-months window plus any extra months that actually
+  // have persisted transactions (so uploads outside the default window appear).
+  const visibleMonths = useMemo(() => {
+    const extras = new Set<string>();
+    for (const person of ["A", "B"] as const) {
+      for (const [m, list] of Object.entries(txns[person] ?? {})) {
+        if (list.length > 0) extras.add(m);
+      }
+    }
+    for (const m of MONTHS) extras.add(m);
+    return Array.from(extras).sort(
+      (a, b) => new Date(`1 ${b}`).getTime() - new Date(`1 ${a}`).getTime(),
+    );
+  }, [txns]);
+
   return (
     <div>
       <div className={styles.subtabBar}>
-        {MONTHS.filter((m) => m !== "Jun 2026").map((m) => (
+        {visibleMonths.map((m) => (
           <button
             key={m}
             type="button"

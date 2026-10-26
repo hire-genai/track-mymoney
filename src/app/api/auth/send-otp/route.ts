@@ -36,6 +36,23 @@ export async function POST(request: Request) {
   }
 
   const q = sql();
+
+  // Rate-limit: one OTP per 60 seconds per email.
+  const recent = (await q`
+    SELECT EXTRACT(EPOCH FROM (NOW() - created_at))::int AS age_secs
+    FROM otps
+    WHERE email = ${email} AND consumed = FALSE
+    ORDER BY id DESC
+    LIMIT 1
+  `) as unknown as { age_secs: number }[];
+  if (recent[0] && recent[0].age_secs < 60) {
+    const wait = 60 - recent[0].age_secs;
+    return NextResponse.json(
+      { error: `Please wait ${wait}s before requesting a new code.`, retryAfter: wait },
+      { status: 429 },
+    );
+  }
+
   const code = generateOtp();
   const codeHash = hashOtp(code);
   const expires = new Date(Date.now() + 10 * 60 * 1000);

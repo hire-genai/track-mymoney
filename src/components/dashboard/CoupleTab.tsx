@@ -23,7 +23,17 @@ export default function CoupleTab() {
     currentMonth,
     uploadedPersons,
     simulateUpload,
+    authenticated,
+    requestImportFor,
   } = useFinance();
+
+  // Authenticated: delegate to UploadSection's native file picker so the OS
+  // dialog opens just like clicking the main upload area. Unauthenticated
+  // landing: use the demo seed (no backend).
+  const startUpload = (id: PersonId) => {
+    if (authenticated) requestImportFor(id);
+    else simulateUpload(id);
+  };
 
   const savingsSubs = useMemo(() => getSavingsSubs(goals), [goals]);
   const [col1, col2] = getColumnGroups(savingsSubs);
@@ -44,10 +54,10 @@ export default function CoupleTab() {
           comparison.
         </p>
         <div className={styles.emptyCta}>
-          <button className={styles.btnPrimary} onClick={() => simulateUpload("A")}>
+          <button className={styles.btnPrimary} onClick={() => startUpload("A")}>
             <Icon name="upload" size={14} /> Upload You
           </button>
-          <button className={styles.btnPartner} onClick={() => simulateUpload("B")}>
+          <button className={styles.btnPartner} onClick={() => startUpload("B")}>
             <Icon name="upload" size={14} /> Upload Partner
           </button>
         </div>
@@ -70,7 +80,7 @@ export default function CoupleTab() {
         <div className={styles.emptyCta}>
           <button
             className={missing === "A" ? styles.btnPrimary : styles.btnPartner}
-            onClick={() => simulateUpload(missing)}
+            onClick={() => startUpload(missing)}
           >
             <Icon name="upload" size={14} /> Upload {p.name}
           </button>

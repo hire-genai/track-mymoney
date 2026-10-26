@@ -37,5 +37,42 @@ export async function ensureSchema(): Promise<void> {
     )
   `;
   await q`CREATE INDEX IF NOT EXISTS idx_otps_email ON otps(email)`;
+
+  await q`
+    CREATE TABLE IF NOT EXISTS imports (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      person CHAR(1) NOT NULL,
+      filename TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      row_count INT NOT NULL DEFAULT 0,
+      raw_response JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await q`CREATE INDEX IF NOT EXISTS idx_imports_user ON imports(user_id)`;
+
+  await q`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      person CHAR(1) NOT NULL,
+      month TEXT NOT NULL,
+      date TEXT NOT NULL,
+      particulars TEXT NOT NULL,
+      amount NUMERIC(14, 2) NOT NULL,
+      type TEXT NOT NULL,
+      category TEXT NOT NULL,
+      import_id BIGINT REFERENCES imports(id) ON DELETE SET NULL,
+      fingerprint TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await q`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_user_fingerprint
+      ON transactions(user_id, fingerprint)
+  `;
+  await q`CREATE INDEX IF NOT EXISTS idx_tx_user_month ON transactions(user_id, person, month)`;
+
   ensured = true;
 }

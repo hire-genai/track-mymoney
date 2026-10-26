@@ -21,7 +21,7 @@ export default function TransactionRow({ tx, month, personId }: Props) {
   const isTagged = taggedIds.has(tx.id);
   const credit = tx.type === "credit";
   const displayAmt = credit ? `+${fmt(tx.amount)}` : fmt(tx.amount);
-  const shortCat = tx.category.length > 18 ? `${tx.category.slice(0, 16)}…` : tx.category;
+  const shortCat = tx.category.length > 14 ? `${tx.category.slice(0, 12)}…` : tx.category;
 
   return (
     <div className={styles.txRow}>

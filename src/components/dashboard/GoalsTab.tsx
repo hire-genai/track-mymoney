@@ -93,23 +93,30 @@ export default function GoalsTab() {
         </span>
       </div>
 
-      <div className={styles.goalsGrid}>
-        {computed.map((g) => (
-          <GoalCard
-            key={g.id}
-            goal={g}
-            funded={g.funded}
-            currentMonth={currentMonth}
-            onMenu={() => openMenu(g.id)}
-            registerRef={(el) => {
-              menuBtnRefs.current[g.id] = el;
-            }}
-            historyFor={(goal) =>
-              computeGoalMonthlySplit(goal, txns, goalHistory, goalPartnerSplit)
-            }
-          />
-        ))}
-      </div>
+      {computed.length === 0 ? (
+        <div className={styles.infoNote} style={{ justifyContent: "center", padding: "1.5rem" }}>
+          <Icon name="target" size={16} />
+          <span>No goals yet. Click <strong>New goal</strong> to create your first one.</span>
+        </div>
+      ) : (
+        <div className={styles.goalsGrid}>
+          {computed.map((g) => (
+            <GoalCard
+              key={g.id}
+              goal={g}
+              funded={g.funded}
+              currentMonth={currentMonth}
+              onMenu={() => openMenu(g.id)}
+              registerRef={(el) => {
+                menuBtnRefs.current[g.id] = el;
+              }}
+              historyFor={(goal) =>
+                computeGoalMonthlySplit(goal, txns, goalHistory, goalPartnerSplit)
+              }
+            />
+          ))}
+        </div>
+      )}
 
       {menuAnchor && menuGoalId && (
         <GoalStatusMenu
@@ -153,7 +160,9 @@ function GoalCard({ goal, funded, currentMonth, onMenu, registerRef, historyFor 
           ? styles.goalStatusCompleted
           : styles.goalStatusCancelled;
 
-  const monthsAsc = ["Jun 2026", "Jul 2026", "Aug 2026", "Sep 2026"];
+  // Use the rolling MONTHS window (newest → oldest) in ascending order so the
+  // "funded per month" bars line up with the rest of the dashboard.
+  const monthsAsc = [...MONTHS].reverse();
 
   return (
     <div

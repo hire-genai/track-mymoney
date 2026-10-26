@@ -225,6 +225,21 @@
   font-size: 0.72rem;
   color: var(--fg-muted);
 }
+.importCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--brand-dark);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.35rem 0.7rem 0.35rem 0.9rem;
+  border-radius: 40px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: 0 6px 14px -8px rgba(5, 150, 105, 0.5);
+}
+
 .uploadStats {
   flex: 1 1 200px;
   display: flex;
@@ -571,7 +586,9 @@
   white-space: nowrap;
 }
 .catBody {
-  padding: 0.1rem 0.8rem 0.8rem 0.8rem;
+  padding: 0.1rem 0.6rem 0.6rem 0.6rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ---------- Subcategory block ---------- */
@@ -580,6 +597,7 @@
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   padding: 0.3rem 0.4rem;
+  min-width: 0;
 }
 .subBlockGoal {
   background: linear-gradient(135deg, #fff, #f0f9ff);
@@ -631,6 +649,8 @@
   gap: 6px;
   border-bottom: 1px dashed var(--border-soft);
   transition: background 0.1s ease;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .txRow:hover {
   background: #fafbfd;
@@ -673,8 +693,9 @@
 .txAmt {
   font-size: 0.74rem;
   font-weight: 700;
-  min-width: 60px;
+  min-width: 54px;
   text-align: right;
+  white-space: nowrap;
 }
 .txAmtCredit {
   color: var(--good);
@@ -685,18 +706,24 @@
   background: #f1f5f9;
   color: #475569;
   border: 1px solid var(--border);
-  padding: 0.15rem 0.5rem;
+  padding: 0.15rem 0.45rem;
   border-radius: 20px;
   font-size: 0.58rem;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 120px;
+  max-width: 92px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: all 0.15s ease;
+  min-width: 0;
+}
+.catPickerToggle > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .catPickerToggle:hover {
   background: var(--border);
@@ -1405,8 +1432,9 @@
 
 .goalsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
+  justify-content: start;
 }
 
 .goalCard {

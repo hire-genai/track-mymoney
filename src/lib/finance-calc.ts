@@ -9,8 +9,8 @@ import type { Goal, MonthSummary, PersonId, StatusResult, Transaction } from "./
 
 export function fmt(n: number): string {
   return (
-    "$" +
-    Math.abs(n).toLocaleString(undefined, {
+    "₹" +
+    Math.abs(n).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })
@@ -19,8 +19,8 @@ export function fmt(n: number): string {
 
 export function fmtShort(n: number): string {
   return (
-    "$" +
-    Math.abs(n).toLocaleString(undefined, {
+    "₹" +
+    Math.abs(n).toLocaleString("en-IN", {
       maximumFractionDigits: 0,
     })
   );

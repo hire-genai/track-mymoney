@@ -27,6 +27,10 @@ export default function CategoryCard({ group, month, personId }: Props) {
   const isOpen = openCategories.has(group.key);
   const groupTotal = useMemo(() => calcGroupTotal(group.subs, txs), [group.subs, txs]);
   const totals = useMemo(() => getMonthTotals(txs), [txs]);
+  const activeSubsCount = useMemo(
+    () => group.subs.filter((sub) => txs.some((t) => t.category === sub)).length,
+    [group.subs, txs],
+  );
   const st = evalPctStatus(group.key, Math.abs(groupTotal), totals.income);
 
   const glowCls =
@@ -78,7 +82,9 @@ export default function CategoryCard({ group, month, personId }: Props) {
           </div>
           <div className={styles.catTitle}>
             <span className={styles.catTitleMain}>{group.label}</span>
-            <span className={styles.catTitleSub}>{group.subs.length} subs</span>
+            <span className={styles.catTitleSub}>
+              {activeSubsCount > 0 ? `${activeSubsCount} active` : `${group.subs.length} subs`}
+            </span>
           </div>
         </div>
         <div className={styles.catHeaderRight}>
@@ -101,43 +107,46 @@ export default function CategoryCard({ group, month, personId }: Props) {
 
       {isOpen && (
         <div className={styles.catBody}>
-          {group.subs.map((sub) => {
-            const subTxs = txs.filter((t) => t.category === sub);
-            const subTotal = sumSubCategory(subTxs, sub);
-            const show = subTxs.length > 0;
-            const isGoal = sub.startsWith("Goal: ");
-            const goalObj = isGoal ? goals.find((g) => g.subCat === sub) : null;
-            return (
-              <div
-                key={sub}
-                className={`${styles.subBlock} ${isGoal ? styles.subBlockGoal : ""}`}
-              >
-                <div className={styles.subTitle}>
-                  <span className={styles.subTitleLeft}>
-                    {goalObj && (
-                      <span className={styles.goalDot} style={{ background: goalObj.color }} />
-                    )}
-                    {goalObj && <Icon name={goalObj.icon as IconName} size={10} />}
-                    <span>{sub}</span>
-                  </span>
-                  <span
-                    className={`${styles.subTotal} ${subTotal >= 0 ? styles.subTotalCredit : ""}`}
-                  >
-                    {show ? fmt(subTotal) : "—"}
-                  </span>
-                </div>
-                {subTxs.length === 0 ? (
-                  <div className={styles.emptyNote}>
-                    {isGoal ? "Tag a transaction here to fund this goal" : "No transactions"}
+          {group.subs
+            .map((sub) => ({
+              sub,
+              subTxs: txs.filter((t) => t.category === sub),
+            }))
+            // Only render a subcategory when at least one real transaction
+            // belongs to it. Empty "No transactions" rows are suppressed.
+            .filter(({ subTxs }) => subTxs.length > 0)
+            .map(({ sub, subTxs }) => {
+              const subTotal = sumSubCategory(subTxs, sub);
+              const isGoal = sub.startsWith("Goal: ");
+              const goalObj = isGoal ? goals.find((g) => g.subCat === sub) : null;
+              return (
+                <div
+                  key={sub}
+                  className={`${styles.subBlock} ${isGoal ? styles.subBlockGoal : ""}`}
+                >
+                  <div className={styles.subTitle}>
+                    <span className={styles.subTitleLeft}>
+                      {goalObj && (
+                        <span className={styles.goalDot} style={{ background: goalObj.color }} />
+                      )}
+                      {goalObj && <Icon name={goalObj.icon as IconName} size={10} />}
+                      <span>{sub}</span>
+                    </span>
+                    <span
+                      className={`${styles.subTotal} ${subTotal >= 0 ? styles.subTotalCredit : ""}`}
+                    >
+                      {fmt(subTotal)}
+                    </span>
                   </div>
-                ) : (
-                  subTxs.map((tx) => (
+                  {subTxs.map((tx) => (
                     <TransactionRow key={tx.id} tx={tx} month={month} personId={personId} />
-                  ))
-                )}
-              </div>
-            );
-          })}
+                  ))}
+                </div>
+              );
+            })}
+          {group.subs.every((sub) => txs.filter((t) => t.category === sub).length === 0) && (
+            <div className={styles.emptyNote}>No transactions in this group</div>
+          )}
         </div>
       )}
     </div>

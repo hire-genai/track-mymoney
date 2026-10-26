@@ -75,7 +75,7 @@ export default function NewGoalModal({ onClose }: Props) {
           />
         </div>
         <div className={styles.formGroup}>
-          <label>Target amount ($)</label>
+          <label>Target amount (₹)</label>
           <input
             type="number"
             min="1"

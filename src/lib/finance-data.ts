@@ -1,7 +1,35 @@
 import type { Goal, MonthSummary, Person, PersonId, TargetRule, Transaction } from "./types";
 
-export const MONTHS = ["Sep 2026", "Aug 2026", "Jul 2026", "Jun 2026"] as const;
-export type MonthName = (typeof MONTHS)[number];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Format a Date as "Mmm YYYY" (e.g. "Oct 2026"). */
+export function monthLabel(d: Date): string {
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** Returns N most-recent months (current first), e.g. ["Oct 2026","Sep 2026",...]. */
+export function recentMonths(count = 4, ref: Date = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(ref.getFullYear(), ref.getMonth() - i, 1);
+    out.push(monthLabel(d));
+  }
+  return out;
+}
+
+/**
+ * Rolling 4-month window ending at the real current month. Replaces the old
+ * hardcoded Sep/Aug/Jul/Jun 2026 list so the dashboard reflects real time.
+ * Demo seed data for Sep 2026 still slots in when that month is in range.
+ */
+export const MONTHS: string[] = recentMonths(4);
+export type MonthName = string;
+
+/** Convenience: this month's label. */
+export const CURRENT_MONTH: string = MONTHS[0];
 
 export const PEOPLE: Record<PersonId, Person> = {
   A: {
@@ -89,18 +117,45 @@ export const personB_SepTransactions: Transaction[] = [
   { id: "B-g5", date: "29-09", particulars: "BOOKMYSHOW", amount: 600.0, type: "debit", category: "Guilt-Free Spending" },
 ];
 
-export const pastMonths: Record<PersonId, Record<string, MonthSummary>> = {
-  A: {
-    "Aug 2026": { income: 52000, fixed: 19500, invest: 6500, savings: 3200, guilt: 1800, net: 11000 },
-    "Jul 2026": { income: 48000, fixed: 18200, invest: 5500, savings: 2900, guilt: 1500, net: 9900 },
-    "Jun 2026": { income: 45000, fixed: 17800, invest: 5000, savings: 2500, guilt: 1400, net: 8300 },
-  },
-  B: {
-    "Aug 2026": { income: 13350, fixed: 30000, invest: 7000, savings: 4000, guilt: 4500, net: -22150 },
-    "Jul 2026": { income: 11800, fixed: 28500, invest: 6500, savings: 3500, guilt: 5200, net: -31900 },
-    "Jun 2026": { income: 11200, fixed: 27000, invest: 6000, savings: 3000, guilt: 4800, net: -29600 },
-  },
-};
+/**
+ * Deterministic pseudo-random dummy data for the Comparison tab so every month
+ * in the rolling window has sensible bars even when the user hasn't uploaded a
+ * statement yet. Seeded by month+person so numbers stay stable across renders.
+ */
+function seededNoise(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 1000) / 1000; // 0..1
+}
+
+function buildMonthSummary(personId: PersonId, month: string): MonthSummary {
+  const base = personId === "A"
+    ? { income: 50000, fixed: 19000, invest: 6000, savings: 3000, guilt: 1700 }
+    : { income: 12500, fixed: 29000, invest: 6700, savings: 3700, guilt: 4800 };
+  const jitter = (key: string, spread: number) =>
+    Math.round(base[key as keyof typeof base] * (0.85 + seededNoise(`${personId}|${month}|${key}`) * spread));
+  const income = jitter("income", 0.3);
+  const fixed = jitter("fixed", 0.2);
+  const invest = jitter("invest", 0.35);
+  const savings = jitter("savings", 0.4);
+  const guilt = jitter("guilt", 0.5);
+  const net = income - (fixed + invest + savings + guilt);
+  return { income, fixed, invest, savings, guilt, net };
+}
+
+function buildPastMonths(): Record<PersonId, Record<string, MonthSummary>> {
+  // Cover a wide window so Comparison always has dummy bars for the rolling
+  // MONTHS set, no matter what the current real month is.
+  const window = recentMonths(12);
+  const makeMap = (pid: PersonId) =>
+    Object.fromEntries(window.map((m) => [m, buildMonthSummary(pid, m)]));
+  return { A: makeMap("A"), B: makeMap("B") };
+}
+
+export const pastMonths: Record<PersonId, Record<string, MonthSummary>> = buildPastMonths();
 
 export const INITIAL_GOALS: Goal[] = [
   { id: "goal-vacation", name: "Family Vacation", subCat: "Goal: Family Vacation", icon: "plane", color: "linear-gradient(135deg,#0891b2,#0e7490)", target: 3000, deadline: "Dec 2026", status: "inprogress" },
