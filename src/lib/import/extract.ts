@@ -42,7 +42,37 @@ export async function extractDocumentText(
   const arrayBuf = await file.arrayBuffer();
 
   if (mime === "application/pdf" || filename.toLowerCase().endsWith(".pdf")) {
-    return await extractPdfText(new Uint8Array(arrayBuf), filename);
+    // unpdf is a pure-JS pdfjs-dist wrapper that works in Vercel's serverless
+    // Node runtime without native deps. The previous `pdf-parse` v2 pulled in
+    // `@napi-rs/canvas` whose native binaries weren't being traced into the
+    // Vercel bundle, producing a bare 500 on upload.
+    try {
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const pdf = await getDocumentProxy(new Uint8Array(arrayBuf));
+      const { totalPages, text: pageTexts } = await extractText(pdf, {
+        mergePages: false,
+      });
+      const joined = pageTexts.join("\n").trim();
+      const text = truncate(joined);
+      const pages = totalPages ?? pageTexts.length ?? null;
+
+      // Scanned-PDF heuristic: a PDF with pages but almost no text layer
+      // is overwhelmingly a scanned document. We refuse rather than send
+      // ~nothing to the AI (which would hallucinate transactions).
+      const charsPerPage = pages && pages > 0 ? text.length / pages : text.length;
+      if (!text || (pages && pages > 0 && charsPerPage < 40)) {
+        throw new ImportError(
+          "This PDF appears to be scanned (no selectable text). Please upload a CSV export or a text-based PDF from your bank's web portal.",
+        );
+      }
+
+      return { text, pages, mime: "application/pdf", filename };
+    } catch (e) {
+      if (e instanceof ImportError) throw e;
+      throw new ImportError(
+        `Could not read this PDF: ${e instanceof Error ? e.message : "unknown error"}`,
+      );
+    }
   }
 
   // CSV / TXT path
@@ -68,86 +98,5 @@ export class ImportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ImportError";
-  }
-}
-
-/**
- * Extract text from a PDF using pdfjs-dist directly. We bypass pdf-parse (v2)
- * because its runtime pulls in @napi-rs/canvas and loads pdf.worker.mjs via a
- * file-URL dance that Vercel's bundler does not include in the serverless
- * function. pdfjs-dist's legacy build runs in Node without a worker and
- * without a canvas (we only need the text layer).
- */
-async function extractPdfText(
-  bytes: Uint8Array,
-  filename: string,
-): Promise<ExtractedDoc> {
-  const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as {
-    getDocument: (src: Record<string, unknown>) => {
-      promise: Promise<{
-        numPages: number;
-        getPage: (n: number) => Promise<{
-          getTextContent: () => Promise<{
-            items: Array<{ str?: string; hasEOL?: boolean }>;
-          }>;
-          cleanup: () => void;
-        }>;
-        destroy: () => Promise<void>;
-      }>;
-    };
-    GlobalWorkerOptions: { workerSrc: unknown };
-  };
-
-  let doc:
-    | Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>
-    | null = null;
-  try {
-    const loadingTask = pdfjs.getDocument({
-      data: bytes,
-      disableFontFace: true,
-      useSystemFonts: false,
-      isEvalSupported: false,
-      verbosity: 0,
-    });
-    doc = await loadingTask.promise;
-
-    const pages = doc.numPages;
-    const parts: string[] = [];
-    for (let i = 1; i <= pages; i++) {
-      const page = await doc.getPage(i);
-      try {
-        const content = await page.getTextContent();
-        let line = "";
-        for (const it of content.items) {
-          const s = typeof it.str === "string" ? it.str : "";
-          line += s;
-          if (it.hasEOL) {
-            parts.push(line);
-            line = "";
-          } else {
-            line += " ";
-          }
-        }
-        if (line.trim()) parts.push(line);
-      } finally {
-        page.cleanup();
-      }
-    }
-
-    const text = truncate(parts.join("\n").replace(/[ \t]+\n/g, "\n").trim());
-    const charsPerPage = pages > 0 ? text.length / pages : text.length;
-    if (!text || (pages > 0 && charsPerPage < 40)) {
-      throw new ImportError(
-        "This PDF appears to be scanned (no selectable text). Please upload a CSV export or a text-based PDF from your bank's web portal.",
-      );
-    }
-    return { text, pages, mime: "application/pdf", filename };
-  } catch (e) {
-    if (e instanceof ImportError) throw e;
-    throw new ImportError(
-      `Could not read this PDF: ${e instanceof Error ? e.message : "unknown error"}`,
-    );
-  } finally {
-    if (doc) await doc.destroy().catch(() => {});
   }
 }
