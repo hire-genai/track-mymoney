@@ -1,20 +1,9 @@
 import "server-only";
 import { sql, ensureSchema } from "@/lib/db";
-import { MONTHS } from "@/lib/finance-data";
+import { MONTHS, monthLabel } from "@/lib/finance-data";
 import type { PersonId, Transaction } from "@/lib/types";
 
 export type TxnStore = Record<PersonId, Record<string, Transaction[]>>;
-
-interface Row {
-  id: number;
-  person: "A" | "B";
-  month: string;
-  date: string;
-  particulars: string;
-  amount: string | number;
-  type: "credit" | "debit";
-  category: string;
-}
 
 export interface UserDataResult {
   txns: TxnStore;
@@ -22,28 +11,110 @@ export interface UserDataResult {
   importsByPerson: Record<PersonId, number>;
 }
 
+interface ImportRow {
+  id: number;
+  person: "A" | "B";
+  transactions: unknown;
+}
+
+interface JsonTxn {
+  isoDate?: string;
+  date?: string;
+  month?: string;
+  particulars?: string;
+  amount?: number | string;
+  type?: "credit" | "debit";
+  category?: string;
+}
+
+function monthFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Unknown";
+  return monthLabel(d);
+}
+
+/**
+ * Load every statement for the user and expand the stored JSONB arrays into
+ * the per-month TxnStore the dashboard expects. Each in-memory transaction gets
+ * a composite id of the form `db-{importId}-{index}` so PATCH/DELETE routes can
+ * locate it inside the JSONB blob.
+ */
 export async function loadUserData(userId: number): Promise<UserDataResult> {
   await ensureSchema();
   const q = sql();
-  const rows = (await q`
-    SELECT id, person, month, date, particulars, amount, type, category
-    FROM transactions
+
+  const imports = (await q`
+    SELECT id, person, transactions
+    FROM imports
     WHERE user_id = ${userId}
-    ORDER BY person ASC, month DESC, date ASC, id ASC
-  `) as unknown as Row[];
+    ORDER BY created_at ASC, id ASC
+  `) as unknown as ImportRow[];
 
   const store: TxnStore = {
     A: Object.fromEntries(MONTHS.map((m) => [m, []])) as Record<string, Transaction[]>,
     B: Object.fromEntries(MONTHS.map((m) => [m, []])) as Record<string, Transaction[]>,
   };
+  const importsByPerson: Record<PersonId, number> = { A: 0, B: 0 };
 
-  for (const row of rows) {
+  for (const imp of imports) {
+    importsByPerson[imp.person] = (importsByPerson[imp.person] ?? 0) + 1;
+    const list = Array.isArray(imp.transactions) ? (imp.transactions as JsonTxn[]) : [];
+    const bucket = store[imp.person];
+    if (!bucket) continue;
+    list.forEach((row, idx) => {
+      if (!row || typeof row !== "object") return;
+      const particulars = typeof row.particulars === "string" ? row.particulars : "";
+      const type = row.type === "credit" || row.type === "debit" ? row.type : "debit";
+      const amount =
+        typeof row.amount === "number"
+          ? row.amount
+          : typeof row.amount === "string"
+            ? Number(row.amount)
+            : NaN;
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      const date = typeof row.date === "string" && row.date ? row.date : "";
+      const month =
+        typeof row.month === "string" && row.month
+          ? row.month
+          : typeof row.isoDate === "string"
+            ? monthFromIso(row.isoDate)
+            : "Unknown";
+      const category = typeof row.category === "string" && row.category ? row.category : "Miscellaneous";
+      const monthList = (bucket[month] ??= []);
+      monthList.push({
+        id: `db-${imp.id}-${idx}`,
+        date,
+        particulars,
+        amount,
+        type,
+        category,
+      });
+    });
+  }
+
+  // Fallback: pick up any rows from the legacy per-row table so historical
+  // imports (pre-JSONB redesign) still show up in the dashboard.
+  const legacyRows = (await q`
+    SELECT id, person, month, date, particulars, amount, type, category
+    FROM transactions
+    WHERE user_id = ${userId}
+    ORDER BY person ASC, month DESC, date ASC, id ASC
+  `) as unknown as Array<{
+    id: number;
+    person: "A" | "B";
+    month: string;
+    date: string;
+    particulars: string;
+    amount: string | number;
+    type: "credit" | "debit";
+    category: string;
+  }>;
+  for (const row of legacyRows) {
     const bucket = store[row.person];
     if (!bucket) continue;
-    // Any month present in the DB is bucketed, even if outside the default recent window.
     const list = (bucket[row.month] ??= []);
     list.push({
-      id: `db-${row.id}`,
+      id: `db-legacy-${row.id}`,
       date: row.date,
       particulars: row.particulars,
       amount: typeof row.amount === "string" ? Number(row.amount) : row.amount,
@@ -52,17 +123,7 @@ export async function loadUserData(userId: number): Promise<UserDataResult> {
     });
   }
 
-  const importRows = (await q`
-    SELECT person, COUNT(*)::int AS n
-    FROM imports
-    WHERE user_id = ${userId}
-    GROUP BY person
-  `) as unknown as Array<{ person: "A" | "B"; n: number }>;
-
-  const importsByPerson: Record<PersonId, number> = { A: 0, B: 0 };
-  for (const r of importRows) importsByPerson[r.person] = r.n;
   const importsCount = importsByPerson.A + importsByPerson.B;
-
   return { txns: store, importsCount, importsByPerson };
 }
 

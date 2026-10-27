@@ -189,12 +189,14 @@ export function FinanceProvider({
         };
       });
 
-      // Persist to DB for authenticated users whose rows came from loadUserData
-      // (ids are `db-<row.id>`). Demo rows don't carry a db id — skip the fetch.
+      // Persist to DB. Ids from loadUserData look like:
+      //   db-{importId}-{index}  → JSONB cell inside imports.transactions
+      //   db-legacy-{rowId}      → legacy per-row transactions table
+      // Demo rows don't carry a db- prefix — skip the fetch.
       if (!authenticated || !txId.startsWith("db-")) return;
-      const dbId = Number(txId.slice(3));
-      if (!Number.isInteger(dbId) || dbId <= 0) return;
-      void fetch(`/api/transactions/${dbId}`, {
+      const compositeId = txId.slice(3);
+      if (!compositeId) return;
+      void fetch(`/api/transactions/${encodeURIComponent(compositeId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category: newCat, type: nextType ?? undefined }),
