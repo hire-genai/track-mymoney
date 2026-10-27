@@ -2,66 +2,146 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ensureSchema, sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { allowedCategories } from "@/lib/import/parser";
+import { allowedCategories } from "@/lib/import/utils";
 
 const patchSchema = z.object({
   category: z.string().min(1).max(100),
   type: z.enum(["credit", "debit"]).optional(),
 });
 
+/**
+ * The composite id looks like `{importId}-{index}` where importId points at
+ * imports.id and index is the position inside imports.transactions JSONB array.
+ * Also supports `legacy-{rowId}` to update rows that still live in the
+ * normalized `transactions` table from before the JSONB redesign.
+ */
+function parseCompositeId(raw: string): { kind: "json"; importId: number; index: number } | { kind: "legacy"; rowId: number } | null {
+  if (raw.startsWith("legacy-")) {
+    const n = Number(raw.slice("legacy-".length));
+    if (!Number.isInteger(n) || n <= 0) return null;
+    return { kind: "legacy", rowId: n };
+  }
+  const [a, b] = raw.split("-");
+  const importId = Number(a);
+  const index = Number(b);
+  if (!Number.isInteger(importId) || importId <= 0) return null;
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { kind: "json", importId, index };
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    return NextResponse.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 },
+    );
+  }
 
   const { id: rawId } = await params;
-  const txId = Number(rawId);
-  if (!Number.isInteger(txId) || txId <= 0) {
-    return NextResponse.json({ error: "Invalid transaction id" }, { status: 400 });
+  const parsedId = parseCompositeId(rawId);
+  if (!parsedId) {
+    return NextResponse.json(
+      { error: "Invalid transaction id", code: "BAD_ID" },
+      { status: 400 },
+    );
   }
 
   let payload: unknown;
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid JSON body", code: "BAD_JSON" },
+      { status: 400 },
+    );
   }
 
   const parsed = patchSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid payload", details: parsed.error.message },
+      { error: "Invalid payload", code: "BAD_PAYLOAD", detail: parsed.error.message },
       { status: 400 },
     );
   }
 
   const allowed = new Set(allowedCategories());
   if (!allowed.has(parsed.data.category)) {
-    return NextResponse.json({ error: "Unknown category" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Unknown category", code: "BAD_CATEGORY" },
+      { status: 400 },
+    );
   }
 
   try {
     await ensureSchema();
   } catch (e) {
     console.error("DB schema error", e);
-    return NextResponse.json({ error: "Database not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Database not configured", code: "DB_UNAVAILABLE" },
+      { status: 500 },
+    );
   }
 
   const q = sql();
-  const nextType = parsed.data.type ?? null;
-  const rows = (await q`
-    UPDATE transactions
-    SET category = ${parsed.data.category},
-        type = COALESCE(${nextType}, type)
-    WHERE id = ${txId} AND user_id = ${user.id}
-    RETURNING id, category, type
-  `) as unknown as Array<{ id: number; category: string; type: string }>;
 
-  if (rows.length === 0) {
-    return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+  if (parsedId.kind === "legacy") {
+    const nextType = parsed.data.type ?? null;
+    const rows = (await q`
+      UPDATE transactions
+      SET category = ${parsed.data.category},
+          type = COALESCE(${nextType}, type)
+      WHERE id = ${parsedId.rowId} AND user_id = ${user.id}
+      RETURNING id, category, type
+    `) as unknown as Array<{ id: number; category: string; type: string }>;
+    if (rows.length === 0) {
+      return NextResponse.json(
+        { error: "Transaction not found", code: "NOT_FOUND" },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ ok: true, transaction: rows[0] });
   }
 
-  return NextResponse.json({ ok: true, transaction: rows[0] });
+  // JSONB in-place update: jsonb_set at the array index.
+  const { importId, index } = parsedId;
+  const categoryPath = `{${index},category}`;
+  const typePath = `{${index},type}`;
+  const categoryJson = JSON.stringify(parsed.data.category);
+  const typeJson = parsed.data.type ? JSON.stringify(parsed.data.type) : null;
+
+  const rows = (await q`
+    UPDATE imports
+    SET transactions = CASE
+      WHEN ${typeJson}::text IS NULL THEN
+        jsonb_set(transactions, ${categoryPath}::text[], ${categoryJson}::jsonb, false)
+      ELSE
+        jsonb_set(
+          jsonb_set(transactions, ${categoryPath}::text[], ${categoryJson}::jsonb, false),
+          ${typePath}::text[], ${typeJson}::jsonb, false
+        )
+    END
+    WHERE id = ${importId} AND user_id = ${user.id}
+      AND jsonb_array_length(transactions) > ${index}
+    RETURNING id
+  `) as unknown as Array<{ id: number }>;
+
+  if (rows.length === 0) {
+    return NextResponse.json(
+      { error: "Transaction not found", code: "NOT_FOUND" },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    transaction: {
+      id: `${importId}-${index}`,
+      category: parsed.data.category,
+      type: parsed.data.type ?? null,
+    },
+  });
 }

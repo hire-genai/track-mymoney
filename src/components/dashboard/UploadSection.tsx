@@ -8,22 +8,6 @@ import type { PersonId } from "@/lib/types";
 import Icon from "@/components/Icon";
 import styles from "./dashboard.module.css";
 
-type Status =
-  | { kind: "idle" }
-  | { kind: "parsing" }
-  | { kind: "saving"; total: number }
-  | { kind: "done"; inserted: number; skipped: number }
-  | { kind: "error"; message: string };
-
-interface ParsedRow {
-  isoDate: string;
-  date: string;
-  particulars: string;
-  amount: number;
-  type: "credit" | "debit";
-  category: string;
-}
-
 export default function UploadSection() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,16 +19,98 @@ export default function UploadSection() {
     uploadedPersons,
     authenticated,
     importsCount,
-    setCurrentMonth,
     registerImportPicker,
   } = useFinance();
   const [over, setOver] = useState(false);
   const [flash, setFlash] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [parsing, setParsing] = useState(false);
+  const [parseStatus, setParseStatus] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const busy = status.kind === "parsing" || status.kind === "saving";
+  const runParseAndCommit = useCallback(
+    async (picked: File) => {
+      setParsing(true);
+      setParseError(null);
+      setParseStatus("Extracting text…");
+      const t0 = performance.now();
+      try {
+        console.log(`[UploadSection] parsing ${picked.name} (${picked.size} bytes) person=${activePerson}`);
+        const fd = new FormData();
+        fd.append("file", picked);
+        fd.append("person", activePerson);
+
+        setParseStatus("Parsing transactions…");
+        const parseRes = await fetch("/api/import/parse", { method: "POST", body: fd });
+        const parseData = (await parseRes.json()) as {
+          ok?: boolean;
+          transactions?: Array<{
+            isoDate: string;
+            date: string;
+            particulars: string;
+            amount: number;
+            type: "credit" | "debit";
+            category: string;
+          }>;
+          counts?: { total: number; credit: number; debit: number };
+          timings?: { extractMs: number; parseMs: number; aiMs: number; totalMs: number };
+          debug?: string[];
+          error?: string;
+          detail?: string;
+        };
+        if (parseData.debug) for (const d of parseData.debug) console.log(`[parse] ${d}`);
+        if (!parseRes.ok || !parseData.ok || !parseData.transactions) {
+          throw new Error(parseData.error ?? `Parse failed (${parseRes.status})`);
+        }
+        if (parseData.transactions.length === 0) {
+          throw new Error("No transactions could be extracted from this file.");
+        }
+
+        setParseStatus(`Saving ${parseData.transactions.length} transactions…`);
+        const commitRes = await fetch("/api/import/commit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            person: activePerson,
+            filename: picked.name,
+            mime: picked.type || "application/octet-stream",
+            transactions: parseData.transactions,
+          }),
+        });
+        const commitData = (await commitRes.json()) as {
+          ok?: boolean;
+          inserted?: number;
+          skipped?: number;
+          error?: string;
+        };
+        if (!commitRes.ok || !commitData.ok) {
+          throw new Error(commitData.error ?? `Save failed (${commitRes.status})`);
+        }
+
+        const elapsed = Math.round(performance.now() - t0);
+        console.log(
+          `[UploadSection] done in ${elapsed}ms — inserted=${commitData.inserted} skipped=${commitData.skipped}`,
+        );
+        setParseStatus(
+          `✓ ${commitData.inserted ?? 0} saved${commitData.skipped ? `, ${commitData.skipped} dupes skipped` : ""} · ${elapsed}ms`,
+        );
+        setFile(null);
+        if (inputRef.current) inputRef.current.value = "";
+        router.refresh();
+        setTimeout(() => setParseStatus(null), 4000);
+      } catch (e) {
+        const msg = (e as Error).message;
+        console.error(`[UploadSection] error:`, msg);
+        setParseError(msg);
+        setParseStatus(null);
+      } finally {
+        setParsing(false);
+      }
+    },
+    [activePerson, router],
+  );
+
   const activePersonName = PEOPLE[activePerson].name;
   const filesCount = authenticated
     ? importsCount
@@ -57,9 +123,6 @@ export default function UploadSection() {
     return total;
   }, [txns]);
 
-  // Reflect the active import target in the URL so the current section is
-  // self-describing (e.g. /dashboard?import=B when uploading for Partner).
-  // Cleared once the file is removed or the save completes.
   const setImportParam = useCallback(
     (value: PersonId | null) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -80,14 +143,12 @@ export default function UploadSection() {
   function clearFile(e: React.MouseEvent) {
     e.stopPropagation();
     setFile(null);
-    setStatus({ kind: "idle" });
     setImportParam(null);
+    setParseError(null);
+    setParseStatus(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  // Expose a programmatic opener so other components (e.g. CoupleTab's
-  // "Upload Partner" button) can switch person + open the native file picker
-  // without re-implementing the hidden input.
   const openPicker = useCallback(
     (id: PersonId) => {
       if (authenticated) {
@@ -113,8 +174,9 @@ export default function UploadSection() {
     if (!picked) return;
     if (authenticated) {
       setFile(picked);
-      setStatus({ kind: "idle" });
       setImportParam(activePerson);
+      setParseError(null);
+      setParseStatus(null);
     } else {
       demoTrigger();
     }
@@ -122,7 +184,6 @@ export default function UploadSection() {
   }
 
   function handleClick(e: React.MouseEvent) {
-    if (busy) return;
     if (authenticated && file) {
       const target = e.target as HTMLElement;
       if (target.closest(`.${styles.importCta}`)) return;
@@ -132,170 +193,6 @@ export default function UploadSection() {
     inputRef.current?.click();
   }
 
-  async function runParseAndSave(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!file || busy) return;
-    const clientId = `imp_c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    const t0 = performance.now();
-    const log = (stage: string, extra?: Record<string, unknown>) => {
-      // eslint-disable-next-line no-console
-      console.log(
-        `%c[import ${clientId}] ${stage}`,
-        "color:#059669;font-weight:bold",
-        { msSinceStart: Math.round(performance.now() - t0), ...extra },
-      );
-    };
-    setStatus({ kind: "parsing" });
-    log("upload start", {
-      file: file.name,
-      bytes: file.size,
-      mime: file.type,
-      person: activePerson,
-    });
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("person", activePerson);
-
-      log("POST /api/import/parse sent");
-      const parseRes = await fetch("/api/import/parse", { method: "POST", body: form });
-      log("POST /api/import/parse response", {
-        status: parseRes.status,
-        ok: parseRes.ok,
-      });
-
-      const parseJson = (await parseRes.json().catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error(`[import ${clientId}] parse response not JSON`, err);
-        return {};
-      })) as {
-        ok?: true;
-        transactions?: ParsedRow[];
-        monthsSeen?: string[];
-        filename?: string;
-        mime?: string;
-        error?: string;
-        code?: string;
-        detail?: string;
-        reqId?: string;
-        modelUsed?: string;
-        attemptedModels?: string[];
-        pages?: number | null;
-        total?: number;
-      };
-      log("parse json decoded", {
-        reqId: parseJson.reqId,
-        ok: parseJson.ok,
-        total: parseJson.total ?? parseJson.transactions?.length,
-        pages: parseJson.pages,
-        modelUsed: parseJson.modelUsed,
-        attemptedModels: parseJson.attemptedModels,
-        code: parseJson.code,
-        errorMsg: parseJson.error,
-        detail: parseJson.detail,
-      });
-
-      if (!parseRes.ok || !parseJson.ok || !parseJson.transactions?.length) {
-        const parts = [
-          parseJson.error || "No transactions could be extracted.",
-          parseJson.code ? `[${parseJson.code}]` : "",
-          parseJson.detail ? `— ${parseJson.detail}` : "",
-          parseJson.reqId ? `(req ${parseJson.reqId})` : "",
-        ].filter(Boolean);
-        // eslint-disable-next-line no-console
-        console.error(`[import ${clientId}] parse failed`, parseJson);
-        setStatus({ kind: "error", message: parts.join(" ") });
-        return;
-      }
-      const transactions = parseJson.transactions;
-      log("parse succeeded — committing", { count: transactions.length });
-      setStatus({ kind: "saving", total: transactions.length });
-
-      log("POST /api/import/commit sent");
-      const commitRes = await fetch("/api/import/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          person: activePerson,
-          filename: parseJson.filename || file.name,
-          mime: parseJson.mime || file.type || "application/octet-stream",
-          transactions,
-        }),
-      });
-      const commitJson = (await commitRes.json().catch(() => ({}))) as {
-        ok?: true;
-        inserted?: number;
-        skipped?: number;
-        error?: string;
-        code?: string;
-        detail?: string;
-      };
-      log("POST /api/import/commit response", {
-        status: commitRes.status,
-        ok: commitRes.ok,
-        inserted: commitJson.inserted,
-        skipped: commitJson.skipped,
-        code: commitJson.code,
-        errorMsg: commitJson.error,
-      });
-      if (!commitRes.ok || !commitJson.ok) {
-        // eslint-disable-next-line no-console
-        console.error(`[import ${clientId}] commit failed`, commitJson);
-        setStatus({
-          kind: "error",
-          message: [
-            commitJson.error || "Could not save transactions.",
-            commitJson.code ? `[${commitJson.code}]` : "",
-            commitJson.detail ? `— ${commitJson.detail}` : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
-        });
-        return;
-      }
-      log("import complete", {
-        inserted: commitJson.inserted,
-        skipped: commitJson.skipped,
-        totalMs: Math.round(performance.now() - t0),
-      });
-      setStatus({
-        kind: "done",
-        inserted: commitJson.inserted ?? 0,
-        skipped: commitJson.skipped ?? 0,
-      });
-      setFile(null);
-      setImportParam(null);
-      // Jump the user to the most recent month we just imported so the KPIs
-      // and category cards reflect the new data immediately.
-      const months = parseJson.monthsSeen ?? [];
-      if (months.length > 0) {
-        const latest = [...months].sort(
-          (a, b) => new Date(`1 ${b}`).getTime() - new Date(`1 ${a}`).getTime(),
-        )[0];
-        setCurrentMonth(latest);
-      }
-      router.refresh();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[import ${clientId}] network/exception`, err);
-      setStatus({
-        kind: "error",
-        message:
-          "Network error during import — " +
-          (err instanceof Error ? err.message : String(err)),
-      });
-    }
-  }
-
-  const ctaLabel =
-    status.kind === "parsing"
-      ? "Parsing…"
-      : status.kind === "saving"
-        ? `Saving ${status.total}…`
-        : file
-          ? "Parse Statement"
-          : "Pick a file";
-
   return (
     <section className={styles.uploadWrap}>
       <div
@@ -303,28 +200,21 @@ export default function UploadSection() {
           flash ? styles.dropzoneFlash : ""
         }`}
         onClick={handleClick}
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (!busy) setOver(true);
-        }}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => {
           e.preventDefault();
           setOver(false);
-          if (busy) return;
           const dropped = e.dataTransfer.files?.[0];
           if (authenticated) {
             if (dropped) {
               setFile(dropped);
-              setStatus({ kind: "idle" });
               setImportParam(activePerson);
             }
           } else {
             demoTrigger();
           }
         }}
-        aria-busy={busy || undefined}
-        style={busy ? { cursor: "default", opacity: 0.9 } : undefined}
       >
         <div className={styles.dropIcon}>
           <Icon name="upload" size={20} />
@@ -338,27 +228,16 @@ export default function UploadSection() {
             )}
           </h3>
           <p className={styles.dropHint}>
-            {status.kind === "parsing" && "Reading your statement with a free AI model…"}
-            {status.kind === "saving" && `Saving ${status.total} transactions…`}
-            {status.kind === "done" && (
-              <>
-                Imported <strong>{status.inserted}</strong>
-                {status.skipped > 0 && <> · skipped {status.skipped} duplicates</>} ·
-                dashboard updated.
-              </>
-            )}
-            {status.kind === "error" && <span style={{ color: "#b91c1c" }}>{status.message}</span>}
-            {status.kind === "idle" &&
-              (authenticated
-                ? file
-                  ? `${(file.size / 1024).toFixed(0)} KB · click to replace, or Parse Statement to extract`
-                  : "PDF, CSV or TXT · AI reads it and saves automatically"
-                : "PDF or CSV · auto-categorized (demo preview)")}
+            {authenticated
+              ? file
+                ? `${(file.size / 1024).toFixed(0)} KB · click to replace`
+                : "PDF, CSV or TXT · select a file to get started"
+              : "PDF or CSV · auto-categorized (demo preview)"}
           </p>
         </div>
         {authenticated && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            {file && !busy && (
+            {file && (
               <button
                 type="button"
                 onClick={clearFile}
@@ -386,16 +265,40 @@ export default function UploadSection() {
               className={styles.importCta}
               onClick={(e) => {
                 e.stopPropagation();
-                if (busy) return;
-                if (file) runParseAndSave(e);
-                else inputRef.current?.click();
+                if (parsing) return;
+                if (file) {
+                  void runParseAndCommit(file);
+                } else {
+                  inputRef.current?.click();
+                }
               }}
-              disabled={busy}
-              aria-disabled={busy}
-              style={busy ? { opacity: 0.6, cursor: "not-allowed" } : undefined}
+              disabled={parsing}
+              aria-disabled={parsing}
+              style={parsing ? { opacity: 0.7, cursor: "wait" } : undefined}
+              title={parsing ? "Parsing…" : file ? "Parse this statement" : "Pick a file to import"}
             >
-              {ctaLabel}
-              <Icon name="chevron-right" size={11} />
+              {parsing ? (
+                <>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: "2px solid rgba(255,255,255,0.4)",
+                      borderTopColor: "#fff",
+                      display: "inline-block",
+                      animation: "tmm-spin 0.7s linear infinite",
+                    }}
+                  />
+                  Parsing…
+                </>
+              ) : (
+                <>
+                  {file ? "Parse Statement" : "Pick a file"}
+                  <Icon name="chevron-right" size={11} />
+                </>
+              )}
             </button>
           </div>
         )}
@@ -406,7 +309,27 @@ export default function UploadSection() {
           accept={authenticated ? ".pdf,.csv,.txt,application/pdf,text/csv,text/plain" : ".pdf,.csv"}
           onChange={onFile}
         />
+        <style>{`@keyframes tmm-spin { to { transform: rotate(360deg); } }`}</style>
       </div>
+
+      {(parseStatus || parseError) && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 12px",
+            borderRadius: 8,
+            fontSize: 13,
+            border: `1px solid ${parseError ? "#fca5a5" : "#86efac"}`,
+            background: parseError ? "#fef2f2" : "#f0fdf4",
+            color: parseError ? "#b91c1c" : "#047857",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {parseError ? <>⚠ {parseError}</> : <>{parseStatus}</>}
+        </div>
+      )}
 
       <div className={styles.uploadStats}>
         <div className={styles.statBadge}>

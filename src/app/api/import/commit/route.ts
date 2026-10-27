@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ensureSchema, sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { allowedCategories, fingerprintRow, formatMonth } from "@/lib/import/parser";
+import { allowedCategories, formatMonth } from "@/lib/import/utils";
 
 const rowSchema = z.object({
   isoDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -22,107 +23,106 @@ const bodySchema = z.object({
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    return NextResponse.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 },
+    );
+  }
 
   let payload: unknown;
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid JSON body", code: "BAD_JSON" },
+      { status: 400 },
+    );
   }
 
   const parsed = bodySchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid payload", details: parsed.error.message },
+      { error: "Invalid payload", code: "BAD_PAYLOAD", detail: parsed.error.message },
       { status: 400 },
     );
   }
   const { person, filename, mime, transactions } = parsed.data;
 
   const allowed = new Set(allowedCategories());
-  const q = sql();
+  const normalized = transactions.map((row) => {
+    const category = allowed.has(row.category)
+      ? row.category
+      : row.type === "credit"
+        ? "Net monthly income"
+        : "Miscellaneous";
+    const d = new Date(row.isoDate);
+    const month = Number.isNaN(d.getTime()) ? "Unknown" : formatMonth(d);
+    return {
+      isoDate: row.isoDate,
+      date: row.date,
+      month,
+      particulars: row.particulars,
+      amount: row.amount,
+      type: row.type,
+      category,
+    };
+  });
+
+  // Statement-level fingerprint — the whole file's extracted content.
+  // Lets us re-import the same statement idempotently (replaces the prior row).
+  const fingerprintSource = `${person}|${filename}|${normalized
+    .map((r) => `${r.isoDate}|${r.amount}|${r.particulars}|${r.type}`)
+    .join("\n")}`;
+  const fileHash = createHash("sha256").update(fingerprintSource).digest("hex");
 
   try {
     await ensureSchema();
   } catch (e) {
     console.error("DB schema error", e);
     return NextResponse.json(
-      { error: "Database not configured. Set DATABASE_URL." },
+      { error: "Database not configured. Set DATABASE_URL.", code: "DB_UNAVAILABLE" },
       { status: 500 },
     );
   }
 
-  const importRows = (await q`
-    INSERT INTO imports (user_id, person, filename, mime, row_count)
-    VALUES (${user.id}, ${person}, ${filename}, ${mime}, ${transactions.length})
-    RETURNING id
-  `) as unknown as Array<{ id: number }>;
-  const importId = importRows[0]?.id;
+  const q = sql();
+  const jsonBody = JSON.stringify(normalized);
 
-  let inserted = 0;
-  let skipped = 0;
-  const chunkSize = 100;
+  // ON CONFLICT handles the idempotent re-upload — same file by the same user
+  // overwrites the earlier row rather than creating a duplicate statement.
+  const rows = (await q`
+    INSERT INTO imports (user_id, person, filename, mime, row_count, transactions, file_hash)
+    VALUES (
+      ${user.id},
+      ${person},
+      ${filename},
+      ${mime},
+      ${normalized.length},
+      ${jsonBody}::jsonb,
+      ${fileHash}
+    )
+    ON CONFLICT (user_id, file_hash)
+    WHERE file_hash IS NOT NULL
+    DO UPDATE SET
+      person = EXCLUDED.person,
+      filename = EXCLUDED.filename,
+      mime = EXCLUDED.mime,
+      row_count = EXCLUDED.row_count,
+      transactions = EXCLUDED.transactions,
+      created_at = NOW()
+    RETURNING id, (xmax = 0) AS inserted
+  `) as unknown as Array<{ id: number; inserted: boolean }>;
 
-  for (let i = 0; i < transactions.length; i += chunkSize) {
-    const chunk = transactions.slice(i, i + chunkSize);
-
-    const values: Array<Record<string, unknown>> = [];
-    for (const row of chunk) {
-      let category = row.category;
-      if (!allowed.has(category)) {
-        category = row.type === "credit" ? "Net monthly income" : "Miscellaneous";
-      }
-      const d = new Date(row.isoDate);
-      if (Number.isNaN(d.getTime())) {
-        skipped++;
-        continue;
-      }
-      const month = formatMonth(d);
-      const fp = fingerprintRow(person, row.isoDate, row.amount, row.particulars, row.type);
-      values.push({
-        user_id: user.id,
-        person,
-        month,
-        date: row.date,
-        particulars: row.particulars,
-        amount: row.amount,
-        type: row.type,
-        category,
-        import_id: importId,
-        fingerprint: fp,
-      });
-    }
-
-    if (values.length === 0) continue;
-
-    const result = (await q`
-      INSERT INTO transactions
-        (user_id, person, month, date, particulars, amount, type, category, import_id, fingerprint)
-      SELECT * FROM jsonb_to_recordset(${JSON.stringify(values)}::jsonb) AS x(
-        user_id INT,
-        person CHAR(1),
-        month TEXT,
-        date TEXT,
-        particulars TEXT,
-        amount NUMERIC,
-        type TEXT,
-        category TEXT,
-        import_id BIGINT,
-        fingerprint TEXT
-      )
-      ON CONFLICT (user_id, fingerprint) DO NOTHING
-      RETURNING id
-    `) as unknown as Array<{ id: number }>;
-
-    inserted += result.length;
-    skipped += values.length - result.length;
-  }
+  const importId = rows[0]?.id;
+  const wasInsert = rows[0]?.inserted === true;
 
   return NextResponse.json({
     ok: true,
-    inserted,
-    skipped,
     importId,
+    inserted: wasInsert ? normalized.length : 0,
+    updated: wasInsert ? 0 : normalized.length,
+    skipped: 0,
+    rowCount: normalized.length,
   });
 }

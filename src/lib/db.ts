@@ -47,11 +47,19 @@ export async function ensureSchema(): Promise<void> {
       mime TEXT NOT NULL,
       row_count INT NOT NULL DEFAULT 0,
       raw_response JSONB,
+      transactions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      file_hash TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
   await q`CREATE INDEX IF NOT EXISTS idx_imports_user ON imports(user_id)`;
+  // Idempotent migrations for existing databases that pre-date the JSONB redesign.
+  await q`ALTER TABLE imports ADD COLUMN IF NOT EXISTS transactions JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await q`ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_hash TEXT`;
+  await q`CREATE UNIQUE INDEX IF NOT EXISTS idx_imports_user_file_hash ON imports(user_id, file_hash) WHERE file_hash IS NOT NULL`;
 
+  // Legacy per-row table kept so existing data remains readable; new imports
+  // write the full array to imports.transactions (JSONB) instead.
   await q`
     CREATE TABLE IF NOT EXISTS transactions (
       id BIGSERIAL PRIMARY KEY,

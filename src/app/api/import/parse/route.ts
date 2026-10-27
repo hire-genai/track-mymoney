@@ -1,27 +1,25 @@
 import { NextResponse } from "next/server";
-import { ensureSchema, sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { extractDocumentText, ImportError } from "@/lib/import/extract";
-import { allowedCategories, parseStatementWithAI } from "@/lib/import/parser";
-import { reconcile } from "@/lib/import/reconcile";
-import {
-  NoFreeModelAvailableError,
-  OpenRouterDiscoveryError,
-} from "@/lib/import/model-registry";
-import { NoModelSucceededError } from "@/lib/import/openrouter";
-import { importLog, startTimer } from "@/lib/import/log";
+import { parseStatementText, parseCsvText } from "@/lib/import/parser";
+import { aiCategorize } from "@/lib/import/ai-categorize";
 
-// 60s is the Vercel Hobby cap. We rely on this instead of the previous 300s
-// so a stalled model never leaves the user staring at a spinner for 5 minutes.
-export const maxDuration = 60;
+const MAX_BYTES = 10 * 1024 * 1024;
+
+function reqId(): string {
+  const n = Math.floor(performance.now() * 1000).toString(36);
+  const r = Math.floor((performance.now() * 7919) % 1e9).toString(36);
+  return `imp_${n}_${r}`;
+}
 
 export async function POST(request: Request) {
-  const reqId = newReqId();
+  const id = reqId();
+  const t0 = performance.now();
+  const debug: string[] = [`[route] ${id} start`];
 
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Unauthorized", reqId },
+      { error: "Unauthorized", code: "UNAUTHORIZED", reqId: id },
       { status: 401 },
     );
   }
@@ -30,259 +28,125 @@ export async function POST(request: Request) {
   try {
     form = await request.formData();
   } catch (e) {
-    importLog.error("formData parse failed", { reqId, message: errMsg(e) });
     return NextResponse.json(
-      { error: "Invalid form data", reqId },
+      { error: "Expected multipart/form-data", code: "BAD_FORM", detail: (e as Error).message, reqId: id },
       { status: 400 },
     );
   }
 
   const file = form.get("file");
-  const person = form.get("person");
+  const person = String(form.get("person") ?? "");
   if (!(file instanceof File)) {
     return NextResponse.json(
-      { error: "No file provided", reqId },
+      { error: "Missing file", code: "NO_FILE", reqId: id },
       { status: 400 },
     );
   }
   if (person !== "A" && person !== "B") {
     return NextResponse.json(
-      { error: "Invalid person", reqId },
+      { error: "Invalid person", code: "BAD_PERSON", reqId: id },
+      { status: 400 },
+    );
+  }
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json(
+      { error: "File too large (max 10 MB)", code: "TOO_LARGE", reqId: id },
       { status: 400 },
     );
   }
 
+  const name = file.name || "upload";
+  const mime = file.type || "application/octet-stream";
+  const lowerName = name.toLowerCase();
+  const isPdf = lowerName.endsWith(".pdf") || mime === "application/pdf";
+  const isCsv = lowerName.endsWith(".csv") || mime === "text/csv";
+  const isTxt = lowerName.endsWith(".txt") || mime === "text/plain";
+
+  debug.push(`[route] file=${name} size=${file.size} mime=${mime} isPdf=${isPdf} isCsv=${isCsv} isTxt=${isTxt}`);
+  console.log(`[import/parse] ${id} file=${name} size=${file.size} mime=${mime}`);
+
+  let text = "";
+  let totalPages: number | undefined;
+
   try {
-    await ensureSchema();
+    if (isPdf) {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      debug.push(`[route] read ${buf.byteLength} bytes for PDF`);
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const pdf = await getDocumentProxy(buf);
+      const extracted = await extractText(pdf, { mergePages: true });
+      text = extracted.text;
+      totalPages = extracted.totalPages;
+      debug.push(`[route] pdf pages=${totalPages}, text chars=${text.length}`);
+    } else if (isCsv || isTxt) {
+      text = await file.text();
+      debug.push(`[route] read ${text.length} chars from ${isCsv ? "CSV" : "TXT"}`);
+    } else {
+      try {
+        text = await file.text();
+        debug.push(`[route] unknown type, read ${text.length} chars as text`);
+      } catch {
+        return NextResponse.json(
+          { error: "Unsupported file type", code: "BAD_TYPE", detail: mime, reqId: id },
+          { status: 400 },
+        );
+      }
+    }
   } catch (e) {
-    importLog.error("ensureSchema failed", {
-      reqId,
-      message: errMsg(e),
-      stack: errStack(e),
-    });
+    console.error(`[import/parse] ${id} extraction failed`, (e as Error).message);
     return NextResponse.json(
-      {
-        error: "Database is not configured or unreachable.",
-        code: "DB_UNAVAILABLE",
-        detail: safeDetail(e),
-        reqId,
-      },
+      { error: "Failed to read file", code: "EXTRACT_FAIL", detail: (e as Error).message, reqId: id },
       { status: 500 },
     );
   }
 
-  importLog.info("parse started", {
-    reqId,
-    user: user.id,
-    person,
-    file: file.name,
-    bytes: file.size,
-    mime: file.type,
-  });
+  const tExtract = performance.now();
+  debug.push(`[route] extracted in ${(tExtract - t0).toFixed(0)}ms`);
 
-  let extracted;
-  const tExtract = startTimer();
-  try {
-    extracted = await extractDocumentText(file);
-    importLog.step("text extracted", {
-      reqId,
-      ms: tExtract(),
-      pages: extracted.pages ?? "?",
-      chars: extracted.text.length,
-    });
-  } catch (e) {
-    if (e instanceof ImportError) {
-      importLog.warn("extract rejected", {
-        reqId,
-        ms: tExtract(),
-        reason: e.message,
-      });
-      return NextResponse.json(
-        { error: e.message, code: "EXTRACT_REJECTED", reqId },
-        { status: 400 },
-      );
-    }
-    importLog.error("extract error", {
-      reqId,
-      ms: tExtract(),
-      message: errMsg(e),
-      stack: errStack(e),
-    });
-    return NextResponse.json(
-      {
-        error: "Could not read the file.",
-        code: "EXTRACT_FAILED",
-        detail: safeDetail(e),
-        reqId,
-      },
-      { status: 500 },
-    );
+  const result = isCsv ? parseCsvText(text) : parseStatementText(text);
+  debug.push(...result.debug);
+
+  const tParse = performance.now();
+  debug.push(`[route] parsed in ${(tParse - tExtract).toFixed(0)}ms`);
+  debug.push(`[route] regex gave ${result.transactions.length} transactions`);
+
+  const aiInput = result.transactions.map((t) => ({
+    isoDate: t.isoDate,
+    particulars: t.particulars,
+    amount: t.amount,
+    type: t.type,
+  }));
+  const aiResults = await aiCategorize(aiInput, debug);
+  for (let i = 0; i < result.transactions.length; i++) {
+    if (aiResults[i]) result.transactions[i].category = aiResults[i].category;
   }
 
-  let parseResult;
-  const tAi = startTimer();
-  try {
-    parseResult = await parseStatementWithAI(
-      extracted.text,
-      allowedCategories(),
-    );
-    importLog.step("AI parse complete", {
-      reqId,
-      ms: tAi(),
-      txns: parseResult.transactions.length,
-      model: parseResult.modelUsed,
-      attempted: parseResult.attemptedModels.length,
-    });
-  } catch (e) {
-    importLog.error("AI parse failed", {
-      reqId,
-      ms: tAi(),
-      message: errMsg(e),
-      stack: errStack(e),
-    });
-    if (e instanceof NoFreeModelAvailableError) {
-      return NextResponse.json(
-        {
-          error:
-            "No eligible free AI model is available on OpenRouter right now. Please try again in a few minutes.",
-          code: "NO_FREE_MODEL",
-          reqId,
-        },
-        { status: 503 },
-      );
-    }
-    if (e instanceof OpenRouterDiscoveryError) {
-      return NextResponse.json(
-        {
-          error:
-            "Could not reach OpenRouter to discover available models. Check your network and OPENROUTER_API_KEY.",
-          code: "DISCOVERY_FAILED",
-          reqId,
-        },
-        { status: 503 },
-      );
-    }
-    if (e instanceof NoModelSucceededError) {
-      return NextResponse.json(
-        {
-          error:
-            "All eligible free models failed to extract transactions. You can retry — a different model may be picked.",
-          code: "ALL_MODELS_FAILED",
-          attemptedModels: e.attemptedModels,
-          detail: safeDetail(e),
-          reqId,
-        },
-        { status: 502 },
-      );
-    }
-    return NextResponse.json(
-      {
-        error: "Could not extract transactions from this file.",
-        code: "PARSE_FAILED",
-        detail: safeDetail(e),
-        reqId,
-      },
-      { status: 502 },
-    );
-  }
+  const tAi = performance.now();
+  debug.push(`[route] categorized in ${(tAi - tParse).toFixed(0)}ms`);
+  debug.push(`[route] total ${(tAi - t0).toFixed(0)}ms, ${result.transactions.length} transactions`);
 
-  let report;
-  try {
-    report = reconcile(parseResult.transactions);
-  } catch (e) {
-    importLog.error("reconcile failed", {
-      reqId,
-      message: errMsg(e),
-      stack: errStack(e),
-    });
-    return NextResponse.json(
-      {
-        error: "Could not reconcile parsed transactions.",
-        code: "RECONCILE_FAILED",
-        detail: safeDetail(e),
-        reqId,
-      },
-      { status: 500 },
-    );
-  }
-
-  let duplicates: Array<{ month: string; count: number }> = [];
-  try {
-    const q = sql();
-    if (parseResult.monthsSeen.length) {
-      const rows = (await q`
-        SELECT month, COUNT(*)::int AS count
-        FROM transactions
-        WHERE user_id = ${user.id}
-          AND person = ${person}
-          AND month = ANY(${parseResult.monthsSeen}::text[])
-        GROUP BY month
-      `) as unknown as Array<{ month: string; count: number }>;
-      duplicates = rows;
-    }
-  } catch (e) {
-    importLog.error("duplicate lookup failed", {
-      reqId,
-      message: errMsg(e),
-      stack: errStack(e),
-    });
-    return NextResponse.json(
-      {
-        error: "Could not check for duplicate months.",
-        code: "DB_QUERY_FAILED",
-        detail: safeDetail(e),
-        reqId,
-      },
-      { status: 500 },
-    );
-  }
-
-  importLog.step("parse ok", {
-    reqId,
-    total: parseResult.transactions.length,
-    months: parseResult.monthsSeen.length,
-    duplicates: duplicates.length,
-  });
+  for (const d of debug) console.log(`[import/parse] ${id} ${d}`);
 
   return NextResponse.json({
     ok: true,
-    reqId,
-    filename: extracted.filename,
-    mime: extracted.mime,
-    pages: extracted.pages,
+    reqId: id,
     person,
-    total: parseResult.transactions.length,
-    transactions: parseResult.transactions,
-    monthsSeen: parseResult.monthsSeen,
-    duplicates,
-    categories: allowedCategories(),
-    modelUsed: parseResult.modelUsed,
-    attemptedModels: parseResult.attemptedModels,
-    reconciliation: report,
+    filename: name,
+    mime,
+    totalPages,
+    transactions: result.transactions,
+    warnings: result.warnings,
+    debug,
+    counts: {
+      total: result.transactions.length,
+      credit: result.transactions.filter((t) => t.type === "credit").length,
+      debit: result.transactions.filter((t) => t.type === "debit").length,
+    },
+    timings: {
+      extractMs: Math.round(tExtract - t0),
+      parseMs: Math.round(tParse - tExtract),
+      aiMs: Math.round(tAi - tParse),
+      totalMs: Math.round(tAi - t0),
+    },
   });
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-function errStack(e: unknown): string | undefined {
-  return e instanceof Error && e.stack ? e.stack.split("\n").slice(0, 6).join("\n") : undefined;
-}
-
-/**
- * Short error summary safe to surface to the browser. Strips newlines and caps
- * length so an unexpected stack trace from a dependency can't flood the client,
- * and never includes raw PDF content (which the import pipeline doesn't put
- * into error messages anyway).
- */
-function safeDetail(e: unknown): string {
-  const raw = errMsg(e).replace(/\s+/g, " ").trim();
-  return raw.length > 240 ? raw.slice(0, 237) + "..." : raw;
-}
-
-function newReqId(): string {
-  const t = Date.now().toString(36);
-  const r = Math.random().toString(36).slice(2, 8);
-  return `imp_${t}_${r}`;
 }
