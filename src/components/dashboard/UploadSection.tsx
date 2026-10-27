@@ -135,30 +135,83 @@ export default function UploadSection() {
   async function runParseAndSave(e: React.MouseEvent) {
     e.stopPropagation();
     if (!file || busy) return;
+    const clientId = `imp_c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const t0 = performance.now();
+    const log = (stage: string, extra?: Record<string, unknown>) => {
+      // eslint-disable-next-line no-console
+      console.log(
+        `%c[import ${clientId}] ${stage}`,
+        "color:#059669;font-weight:bold",
+        { msSinceStart: Math.round(performance.now() - t0), ...extra },
+      );
+    };
     setStatus({ kind: "parsing" });
+    log("upload start", {
+      file: file.name,
+      bytes: file.size,
+      mime: file.type,
+      person: activePerson,
+    });
     try {
       const form = new FormData();
       form.append("file", file);
       form.append("person", activePerson);
+
+      log("POST /api/import/parse sent");
       const parseRes = await fetch("/api/import/parse", { method: "POST", body: form });
-      const parseJson = (await parseRes.json().catch(() => ({}))) as {
+      log("POST /api/import/parse response", {
+        status: parseRes.status,
+        ok: parseRes.ok,
+      });
+
+      const parseJson = (await parseRes.json().catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`[import ${clientId}] parse response not JSON`, err);
+        return {};
+      })) as {
         ok?: true;
         transactions?: ParsedRow[];
         monthsSeen?: string[];
         filename?: string;
         mime?: string;
         error?: string;
+        code?: string;
+        detail?: string;
+        reqId?: string;
+        modelUsed?: string;
+        attemptedModels?: string[];
+        pages?: number | null;
+        total?: number;
       };
+      log("parse json decoded", {
+        reqId: parseJson.reqId,
+        ok: parseJson.ok,
+        total: parseJson.total ?? parseJson.transactions?.length,
+        pages: parseJson.pages,
+        modelUsed: parseJson.modelUsed,
+        attemptedModels: parseJson.attemptedModels,
+        code: parseJson.code,
+        errorMsg: parseJson.error,
+        detail: parseJson.detail,
+      });
+
       if (!parseRes.ok || !parseJson.ok || !parseJson.transactions?.length) {
-        setStatus({
-          kind: "error",
-          message: parseJson.error || "No transactions could be extracted.",
-        });
+        const parts = [
+          parseJson.error || "No transactions could be extracted.",
+          parseJson.code ? `[${parseJson.code}]` : "",
+          parseJson.detail ? `— ${parseJson.detail}` : "",
+          parseJson.reqId ? `(req ${parseJson.reqId})` : "",
+        ].filter(Boolean);
+        // eslint-disable-next-line no-console
+        console.error(`[import ${clientId}] parse failed`, parseJson);
+        setStatus({ kind: "error", message: parts.join(" ") });
         return;
       }
       const transactions = parseJson.transactions;
+      log("parse succeeded — committing", { count: transactions.length });
       setStatus({ kind: "saving", total: transactions.length });
 
+      log("POST /api/import/commit sent");
       const commitRes = await fetch("/api/import/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,11 +227,37 @@ export default function UploadSection() {
         inserted?: number;
         skipped?: number;
         error?: string;
+        code?: string;
+        detail?: string;
       };
+      log("POST /api/import/commit response", {
+        status: commitRes.status,
+        ok: commitRes.ok,
+        inserted: commitJson.inserted,
+        skipped: commitJson.skipped,
+        code: commitJson.code,
+        errorMsg: commitJson.error,
+      });
       if (!commitRes.ok || !commitJson.ok) {
-        setStatus({ kind: "error", message: commitJson.error || "Could not save transactions." });
+        // eslint-disable-next-line no-console
+        console.error(`[import ${clientId}] commit failed`, commitJson);
+        setStatus({
+          kind: "error",
+          message: [
+            commitJson.error || "Could not save transactions.",
+            commitJson.code ? `[${commitJson.code}]` : "",
+            commitJson.detail ? `— ${commitJson.detail}` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        });
         return;
       }
+      log("import complete", {
+        inserted: commitJson.inserted,
+        skipped: commitJson.skipped,
+        totalMs: Math.round(performance.now() - t0),
+      });
       setStatus({
         kind: "done",
         inserted: commitJson.inserted ?? 0,
@@ -196,8 +275,15 @@ export default function UploadSection() {
         setCurrentMonth(latest);
       }
       router.refresh();
-    } catch {
-      setStatus({ kind: "error", message: "Network error during import." });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[import ${clientId}] network/exception`, err);
+      setStatus({
+        kind: "error",
+        message:
+          "Network error during import — " +
+          (err instanceof Error ? err.message : String(err)),
+      });
     }
   }
 
