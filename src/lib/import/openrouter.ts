@@ -16,7 +16,7 @@ const REQUEST_TIMEOUT_MS = 25_000;
  * fast, structured-output-capable free tier model on OpenRouter.
  */
 export const PINNED_MODEL_ID =
-  process.env.OPENROUTER_MODEL_ID ?? "deepseek/deepseek-chat-v3.1:free";
+  process.env.OPENROUTER_MODEL_ID ?? "meta-llama/llama-3.3-70b-instruct:free";
 
 interface JsonSchema {
   name: string;
