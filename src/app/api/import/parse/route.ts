@@ -11,7 +11,9 @@ import {
 import { NoModelSucceededError } from "@/lib/import/openrouter";
 import { importLog, startTimer } from "@/lib/import/log";
 
-export const maxDuration = 300;
+// 60s is the Vercel Hobby cap. We rely on this instead of the previous 300s
+// so a stalled model never leaves the user staring at a spinner for 5 minutes.
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const reqId = newReqId();

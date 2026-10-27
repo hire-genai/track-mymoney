@@ -48,10 +48,16 @@ export async function extractDocumentText(
     // Vercel bundle, producing a bare 500 on upload.
     try {
       const { extractText, getDocumentProxy } = await import("unpdf");
-      const pdf = await getDocumentProxy(new Uint8Array(arrayBuf));
-      const { totalPages, text: pageTexts } = await extractText(pdf, {
-        mergePages: false,
-      });
+      const pdf = await withTimeout(
+        getDocumentProxy(new Uint8Array(arrayBuf)),
+        10_000,
+        "PDF document load",
+      );
+      const { totalPages, text: pageTexts } = await withTimeout(
+        extractText(pdf, { mergePages: false }),
+        15_000,
+        "PDF text extraction",
+      );
       const joined = pageTexts.join("\n").trim();
       const text = truncate(joined);
       const pages = totalPages ?? pageTexts.length ?? null;
@@ -98,5 +104,20 @@ export class ImportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ImportError";
+  }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new ImportError(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

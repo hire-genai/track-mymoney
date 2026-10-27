@@ -2,13 +2,21 @@ import "server-only";
 import { importLog, startTimer } from "./log";
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-const REQUEST_TIMEOUT_MS = 60_000;
+// Keep well under Vercel's 60s route cap so a slow model returns a JSON error
+// instead of letting Vercel kill the function with an opaque 504.
+const REQUEST_TIMEOUT_MS = 25_000;
 
 /**
  * Hard-pinned model. We no longer discover or fall back across free models —
  * every request goes to this one model id. Change here if the pin needs to move.
+ *
+ * `nvidia/nemotron-3-ultra-550b-a55b:free` was not a valid OpenRouter id — the
+ * endpoint accepted the request but the backing model stalled indefinitely,
+ * causing Vercel 504s on upload. `deepseek/deepseek-chat-v3.1:free` is a real,
+ * fast, structured-output-capable free tier model on OpenRouter.
  */
-export const PINNED_MODEL_ID = "nvidia/nemotron-3-ultra-550b-a55b:free";
+export const PINNED_MODEL_ID =
+  process.env.OPENROUTER_MODEL_ID ?? "deepseek/deepseek-chat-v3.1:free";
 
 interface JsonSchema {
   name: string;
