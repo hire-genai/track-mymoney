@@ -41,21 +41,6 @@ CREATE INDEX IF NOT EXISTS idx_imports_user ON imports(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_imports_user_file_hash
   ON imports(user_id, file_hash) WHERE file_hash IS NOT NULL;
 
--- Legacy per-row table. Preserved so historical data still loads, but the new
--- commit flow writes the full array to imports.transactions (JSONB) instead.
-CREATE TABLE IF NOT EXISTS transactions (
-  id BIGSERIAL PRIMARY KEY,
-  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  person CHAR(1) NOT NULL,
-  month TEXT NOT NULL,
-  date TEXT NOT NULL,
-  particulars TEXT NOT NULL,
-  amount NUMERIC(14, 2) NOT NULL,
-  type TEXT NOT NULL,
-  category TEXT NOT NULL,
-  import_id BIGINT REFERENCES imports(id) ON DELETE SET NULL,
-  fingerprint TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_user_fingerprint ON transactions(user_id, fingerprint);
-CREATE INDEX IF NOT EXISTS idx_tx_user_month ON transactions(user_id, person, month);
+-- The per-row `transactions` table was retired. All transactions live inside
+-- imports.transactions (JSONB). Drop it if an older deployment still has it.
+DROP TABLE IF EXISTS transactions;

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { AuthUser } from "@/lib/types";
 import TopBar from "./TopBar";
 import UploadSection from "./UploadSection";
+import StatementsSection from "./StatementsSection";
 import MonthsTab from "./MonthsTab";
 import ComparisonTab from "./ComparisonTab";
 import CoupleTab from "./CoupleTab";
@@ -12,16 +13,17 @@ import GoalsTab from "./GoalsTab";
 import Icon, { type IconName } from "@/components/Icon";
 import styles from "./dashboard.module.css";
 
-type TabKey = "months" | "comparison" | "couple" | "goals";
+type TabKey = "months" | "comparison" | "couple" | "goals" | "statements";
 
 const TABS: Array<{ key: TabKey; label: string; icon: IconName }> = [
   { key: "months", label: "Months", icon: "calendar" },
   { key: "comparison", label: "Comparison", icon: "line-chart" },
   { key: "couple", label: "Couple", icon: "heart" },
   { key: "goals", label: "Goals", icon: "target" },
+  { key: "statements", label: "Statements", icon: "file" },
 ];
 
-const TAB_KEYS: readonly TabKey[] = ["months", "comparison", "couple", "goals"];
+const TAB_KEYS: readonly TabKey[] = ["months", "comparison", "couple", "goals", "statements"];
 
 function parseTab(v: string | null): TabKey {
   return (TAB_KEYS as readonly string[]).includes(v ?? "") ? (v as TabKey) : "months";
@@ -86,6 +88,9 @@ export default function DashboardApp({ user }: { user: AuthUser | null }) {
       </div>
       <div style={{ display: tab === "goals" ? "block" : "none" }}>
         <GoalsTab />
+      </div>
+      <div style={{ display: tab === "statements" ? "block" : "none" }}>
+        <StatementsSection />
       </div>
     </div>
   );

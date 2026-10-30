@@ -12,21 +12,14 @@ const patchSchema = z.object({
 /**
  * The composite id looks like `{importId}-{index}` where importId points at
  * imports.id and index is the position inside imports.transactions JSONB array.
- * Also supports `legacy-{rowId}` to update rows that still live in the
- * normalized `transactions` table from before the JSONB redesign.
  */
-function parseCompositeId(raw: string): { kind: "json"; importId: number; index: number } | { kind: "legacy"; rowId: number } | null {
-  if (raw.startsWith("legacy-")) {
-    const n = Number(raw.slice("legacy-".length));
-    if (!Number.isInteger(n) || n <= 0) return null;
-    return { kind: "legacy", rowId: n };
-  }
+function parseCompositeId(raw: string): { importId: number; index: number } | null {
   const [a, b] = raw.split("-");
   const importId = Number(a);
   const index = Number(b);
   if (!Number.isInteger(importId) || importId <= 0) return null;
   if (!Number.isInteger(index) || index < 0) return null;
-  return { kind: "json", importId, index };
+  return { importId, index };
 }
 
 export async function PATCH(
@@ -87,24 +80,6 @@ export async function PATCH(
   }
 
   const q = sql();
-
-  if (parsedId.kind === "legacy") {
-    const nextType = parsed.data.type ?? null;
-    const rows = (await q`
-      UPDATE transactions
-      SET category = ${parsed.data.category},
-          type = COALESCE(${nextType}, type)
-      WHERE id = ${parsedId.rowId} AND user_id = ${user.id}
-      RETURNING id, category, type
-    `) as unknown as Array<{ id: number; category: string; type: string }>;
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { error: "Transaction not found", code: "NOT_FOUND" },
-        { status: 404 },
-      );
-    }
-    return NextResponse.json({ ok: true, transaction: rows[0] });
-  }
 
   // JSONB in-place update: jsonb_set at the array index.
   const { importId, index } = parsedId;
