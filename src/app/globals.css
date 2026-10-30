@@ -1,33 +1,71 @@
 :root {
-  --bg: #f6f8fb;
+  /* Surfaces */
+  --bg: #f0f4f8;
   --bg-elev: #ffffff;
-  --fg: #0f172a;
-  --fg-muted: #64748b;
-  --fg-soft: #94a3b8;
-  --border: #e2e8f0;
-  --border-soft: #eef2f7;
+  --bg-subtle: #f8fafc;
+  --bg-glass: rgba(255, 255, 255, 0.72);
+
+  /* Text */
+  --fg: #0d1117;
+  --fg-muted: #5a6a7e;
+  --fg-soft: #8a9ab0;
+
+  /* Borders */
+  --border: #dde4ec;
+  --border-soft: #eaeff5;
+
+  /* Brand — Emerald */
   --brand: #059669;
   --brand-dark: #047857;
+  --brand-mid: #10b981;
   --brand-soft: #ecfdf5;
+  --brand-glow: rgba(5, 150, 105, 0.18);
+
+  /* Accent — Indigo */
   --accent: #4f46e5;
+  --accent-dark: #4338ca;
   --accent-soft: #eef2ff;
+  --accent-glow: rgba(79, 70, 229, 0.15);
+
+  /* Partner — Purple */
   --partner: #9333ea;
   --partner-dark: #7c3aed;
   --partner-soft: #f5f3ff;
+  --partner-glow: rgba(147, 51, 234, 0.15);
+
+  /* Semantic */
   --good: #15803d;
+  --good-mid: #16a34a;
   --good-soft: #dcfce7;
   --warn: #b45309;
   --warn-soft: #fef3c7;
   --bad: #b91c1c;
   --bad-soft: #fee2e2;
+
+  /* Radius */
+  --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 20px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 8px 20px -8px rgba(15, 23, 42, 0.12);
-  --shadow-lg: 0 20px 40px -16px rgba(15, 23, 42, 0.2);
+  --radius-2xl: 28px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(13, 17, 23, 0.05);
+  --shadow-sm: 0 1px 3px rgba(13, 17, 23, 0.06), 0 2px 8px -2px rgba(13, 17, 23, 0.08);
+  --shadow-md: 0 4px 16px -4px rgba(13, 17, 23, 0.12), 0 1px 4px rgba(13, 17, 23, 0.06);
+  --shadow-lg: 0 12px 40px -12px rgba(13, 17, 23, 0.20), 0 4px 16px -8px rgba(13, 17, 23, 0.12);
+  --shadow-xl: 0 24px 64px -16px rgba(13, 17, 23, 0.28);
+  --shadow-brand: 0 8px 24px -8px rgba(5, 150, 105, 0.40);
+  --shadow-accent: 0 8px 24px -8px rgba(79, 70, 229, 0.36);
+
+  /* Typography */
   --font-sans: var(--font-inter, Inter), system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 * {
@@ -67,9 +105,7 @@ button {
   color: inherit;
 }
 
-input,
-select,
-textarea {
+input, select, textarea {
   font-family: inherit;
   color: inherit;
 }
@@ -77,4 +113,9 @@ textarea {
 ::selection {
   background: var(--brand-soft);
   color: var(--brand-dark);
+}
+
+/* Utility spinner for loading states */
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

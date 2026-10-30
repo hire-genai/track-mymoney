@@ -22,16 +22,14 @@ export interface AiCategorized extends AiTxn {
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 /**
- * Primary + fallback model list sent to OpenRouter's router. First one that
- * responds wins. Picking fast instruct-tuned models here rather than the
- * reasoning-first nemotron 550B, which was timing out at 25 s on every batch.
+ * Single model: NVIDIA Nemotron 3 Ultra via OpenRouter. If this model fails or
+ * errors, we DO NOT silently switch to another model — the per-batch error is
+ * surfaced in the debug array and the deterministic keyword categorizer takes
+ * over (that is a non-AI rule-based fallback, not another model).
  */
-const MODELS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemini-2.0-flash-exp:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
-];
+export const MODELS = ["nvidia/nemotron-3-ultra-550b-a55b:free"];
 const BATCH_SIZE = 25;
+export const RATE_LIMIT_RETRY_DELAY_MS = 2_000;
 const PARALLEL = 3;
 const TIMEOUT_MS = 55_000;
 const RETRIES = 1;
@@ -111,6 +109,20 @@ interface ChatResponse {
   error?: { message?: string };
 }
 
+class OpenRouterBillingError extends Error {
+  constructor(body: string) {
+    super(`HTTP 402 — billing or no credits: ${body.slice(0, 150)}`);
+    this.name = "OpenRouterBillingError";
+  }
+}
+
+class OpenRouterRateLimitError extends Error {
+  constructor(body: string) {
+    super(`HTTP 429 — rate limited: ${body.slice(0, 150)}`);
+    this.name = "OpenRouterRateLimitError";
+  }
+}
+
 async function callOpenRouter(
   prompt: string,
   signal: AbortSignal,
@@ -133,8 +145,9 @@ async function callOpenRouter(
       response_format: { type: "json_object" },
       // Disable chain-of-thought on reasoning models — we need a fast JSON reply.
       reasoning: { enabled: false },
-      // Prefer the fastest provider endpoint for whichever model wins the race.
-      provider: { sort: "throughput", allow_fallbacks: true },
+      // No model fallbacks — use only Nemotron free. Disable provider-side
+      // fallbacks too so OpenRouter can't silently serve a different model.
+      provider: { sort: "throughput", allow_fallbacks: false },
       messages: [
         {
           role: "system",
@@ -147,6 +160,8 @@ async function callOpenRouter(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 402) throw new OpenRouterBillingError(body);
+    if (res.status === 429) throw new OpenRouterRateLimitError(body);
     throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 200)}`);
   }
   const data = (await res.json()) as ChatResponse;
@@ -190,7 +205,7 @@ async function runBatch(
       const raw = await callOpenRouter(buildPrompt(items), controller.signal);
       clearTimeout(timer);
       if (!raw) {
-        debug.push(`[ai] batch ${bi} attempt ${attempt}: empty response`);
+        debug.push(`[ai] batch ${bi} attempt ${attempt}: no response from ${MODELS[0]}`);
       } else {
         const cats = parseCategories(raw, items.length);
         if (!cats) {
@@ -202,17 +217,33 @@ async function runBatch(
             ALLOWED.has(c) ? c : fallbackCategorize(items[i].particulars, items[i].type),
           );
           const ms = Math.round(performance.now() - t0);
-          debug.push(`[ai] batch ${bi}: ${items.length} txns in ${ms}ms (attempt ${attempt})`);
+          debug.push(`[ai] batch ${bi}: ${items.length} txns in ${ms}ms via ${MODELS[0]} (attempt ${attempt})`);
           return mapped;
         }
       }
     } catch (e) {
       clearTimeout(timer);
-      const msg = (e as Error).message;
-      debug.push(`[ai] batch ${bi} attempt ${attempt}: ${msg.slice(0, 140)}`);
+      if (e instanceof OpenRouterBillingError) {
+        debug.push(
+          `[ai] batch ${bi}: 402 payment required / no credits — keyword fallback (no retry)`,
+        );
+        break; // retrying won't fix a billing issue
+      }
+      if (e instanceof OpenRouterRateLimitError) {
+        const willRetry = attempt < RETRIES;
+        debug.push(
+          `[ai] batch ${bi} attempt ${attempt}: 429 rate limited — ${willRetry ? `waiting ${RATE_LIMIT_RETRY_DELAY_MS}ms before retry` : "keyword fallback"}`,
+        );
+        if (willRetry) await new Promise<void>((r) => setTimeout(r, RATE_LIMIT_RETRY_DELAY_MS));
+      } else {
+        const msg = (e as Error).message;
+        debug.push(`[ai] batch ${bi} attempt ${attempt}: ${msg.slice(0, 140)}`);
+      }
     }
   }
-  debug.push(`[ai] batch ${bi}: all attempts failed — keyword fallback`);
+  debug.push(
+    `[ai] batch ${bi}: ${MODELS[0]} failed — keyword fallback (no model switch)`,
+  );
   return items.map((t) => fallbackCategorize(t.particulars, t.type));
 }
 

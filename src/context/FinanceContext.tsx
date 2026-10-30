@@ -189,9 +189,8 @@ export function FinanceProvider({
         };
       });
 
-      // Persist to DB. Ids from loadUserData look like:
-      //   db-{importId}-{index}  → JSONB cell inside imports.transactions
-      //   db-legacy-{rowId}      → legacy per-row transactions table
+      // Persist to DB. Ids from loadUserData look like `db-{importId}-{index}`
+      // and point at a JSONB cell inside imports.transactions.
       // Demo rows don't carry a db- prefix — skip the fetch.
       if (!authenticated || !txId.startsWith("db-")) return;
       const compositeId = txId.slice(3);

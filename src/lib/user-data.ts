@@ -1,6 +1,6 @@
 import "server-only";
 import { sql, ensureSchema } from "@/lib/db";
-import { MONTHS, monthLabel } from "@/lib/finance-data";
+import { MONTHS, monthLabel, getPrimaryCategory } from "@/lib/finance-data";
 import type { PersonId, Transaction } from "@/lib/types";
 
 export type TxnStore = Record<PersonId, Record<string, Transaction[]>>;
@@ -88,38 +88,8 @@ export async function loadUserData(userId: number): Promise<UserDataResult> {
         amount,
         type,
         category,
+        primaryCategory: getPrimaryCategory(category),
       });
-    });
-  }
-
-  // Fallback: pick up any rows from the legacy per-row table so historical
-  // imports (pre-JSONB redesign) still show up in the dashboard.
-  const legacyRows = (await q`
-    SELECT id, person, month, date, particulars, amount, type, category
-    FROM transactions
-    WHERE user_id = ${userId}
-    ORDER BY person ASC, month DESC, date ASC, id ASC
-  `) as unknown as Array<{
-    id: number;
-    person: "A" | "B";
-    month: string;
-    date: string;
-    particulars: string;
-    amount: string | number;
-    type: "credit" | "debit";
-    category: string;
-  }>;
-  for (const row of legacyRows) {
-    const bucket = store[row.person];
-    if (!bucket) continue;
-    const list = (bucket[row.month] ??= []);
-    list.push({
-      id: `db-legacy-${row.id}`,
-      date: row.date,
-      particulars: row.particulars,
-      amount: typeof row.amount === "string" ? Number(row.amount) : row.amount,
-      type: row.type,
-      category: row.category,
     });
   }
 

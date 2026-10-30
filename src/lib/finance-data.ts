@@ -241,3 +241,22 @@ export function getAllCategories(savingsSubs: string[]) {
     { group: "Guilt-Free", subs: GUILT_SUBS },
   ];
 }
+
+/**
+ * Map a subcategory string to its primary group key.
+ * `extraSavingsSubs` lets callers pass user-defined savings goals so they map
+ * to "Savings". Truly unknown subcategories return "Unknown" rather than
+ * silently defaulting to "Savings" — the caller must decide what to do.
+ */
+export function getPrimaryCategory(
+  sub: string,
+  extraSavingsSubs: readonly string[] = [],
+): string {
+  if ((INCOME_SUBS as readonly string[]).includes(sub)) return "Income";
+  if ((FIXED_SUBS as readonly string[]).includes(sub)) return "Fixed";
+  if ((INVEST_SUBS as readonly string[]).includes(sub)) return "Investments";
+  if ((BASE_SAVINGS_SUBS as readonly string[]).includes(sub)) return "Savings";
+  if (extraSavingsSubs.includes(sub)) return "Savings";
+  if ((GUILT_SUBS as readonly string[]).includes(sub)) return "Guilt-Free";
+  return "Unknown";
+}

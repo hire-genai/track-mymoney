@@ -9,6 +9,7 @@ export interface Transaction {
   amount: number;
   type: TxType;
   category: string;
+  primaryCategory?: string;
 }
 
 export type GoalStatus = "inprogress" | "onhold" | "completed" | "cancelled";
