@@ -16,7 +16,6 @@ import {
   IconCheck,
   IconUpload,
   IconChart,
-  IconStar,
 } from "./icons";
 
 /* ─── Reveal-on-scroll (ENHANCEMENT only — content is visible by default) ─── */
@@ -196,9 +195,6 @@ export default function Landing() {
                 <div className={styles.proofAv} style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>+</div>
               </div>
               <div className={styles.proofText}>
-                <div className={styles.proofStars}>
-                  <IconStar size={13} /><IconStar size={13} /><IconStar size={13} /><IconStar size={13} /><IconStar size={13} />
-                </div>
                 <span>Trusted by couples &amp; serious savers worldwide</span>
               </div>
             </div>
@@ -298,31 +294,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ═══ MARQUEE ═══ */}
-      <section className={styles.marquee}>
-        <div className={styles.marqueeTrack}>
-          {[...Array(2)].map((_, loop) => (
-            <div key={loop} className={styles.marqueeInner}>
-              <span><IconZap size={16} /> Parses in under 60 seconds</span>
-              <span className={styles.marqueeDot}>•</span>
-              <span><IconLock size={16} /> Your data never leaves your account</span>
-              <span className={styles.marqueeDot}>•</span>
-              <span><IconSparkles size={16} /> AI categorizes every transaction</span>
-              <span className={styles.marqueeDot}>•</span>
-              <span><IconUsers size={16} /> Built for couples with shared finances</span>
-              <span className={styles.marqueeDot}>•</span>
-              <span><IconTarget size={16} /> Savings goals that actually move</span>
-              <span className={styles.marqueeDot}>•</span>
-              <span><IconChart size={16} /> Month-over-month visibility</span>
-              <span className={styles.marqueeDot}>•</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ═══ STATS BAR ═══ */}
-      <StatsBar />
-
       {/* ═══ WHY ═══ */}
       <WhySection />
 
@@ -336,7 +307,6 @@ export default function Landing() {
       <HowSection />
 
       {/* ═══ TESTIMONIALS ═══ */}
-      <TestimonialsSection />
 
       {/* ═══ CTA ═══ */}
       <FinalCta />
@@ -753,48 +723,6 @@ function HowSection() {
               </div>
             );
           })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function TestimonialsSection() {
-  const quotes = [
-    { q: "I never knew I was spending so much on dining. Three weeks after seeing it, I cut it in half — without feeling deprived.", name: "Maria R.", role: "Product designer", color: "#10b981" },
-    { q: "We stopped arguing about money the night we opened couples mode. The numbers just removed the whole conversation from feelings.", name: "Kaito & Mei", role: "Married 4 years", color: "#9333ea" },
-    { q: "I'm a spreadsheet person. I resisted this for a year. I'm now 8 months in and it's the first time my budget actually matches reality.", name: "Alex T.", role: "Software engineer", color: "#4f46e5" },
-  ];
-  return (
-    <section className={styles.testimonials}>
-      <div className={styles.testimonialsInner}>
-        <div className={styles.sectionEyebrow} style={{ textAlign: "center" }}>What people say</div>
-        <h2 className={styles.sectionTitle} style={{ textAlign: "center" }}>Clarity, not judgment.</h2>
-
-        <div className={styles.testimonialGrid}>
-          {quotes.map((t, i) => (
-            <div key={i} className={styles.testimonial}>
-              <div className={styles.testimonialQuote}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M7 7h4v4H7c0 2 1 3 3 3v2c-3.5 0-6-2-6-5V7zm10 0h4v4h-4c0 2 1 3 3 3v2c-3.5 0-6-2-6-5V7z"
-                    fill={t.color} opacity="0.25" />
-                </svg>
-              </div>
-              <p>&ldquo;{t.q}&rdquo;</p>
-              <div className={styles.testimonialFoot}>
-                <div className={styles.testimonialAvatar} style={{ background: `linear-gradient(135deg, ${t.color}, ${t.color}cc)` }}>
-                  {t.name.charAt(0)}
-                </div>
-                <div>
-                  <strong>{t.name}</strong>
-                  <span>{t.role}</span>
-                </div>
-                <div className={styles.testimonialStars}>
-                  <IconStar size={12} /><IconStar size={12} /><IconStar size={12} /><IconStar size={12} /><IconStar size={12} />
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </section>
