@@ -7,6 +7,7 @@ import { PEOPLE } from "@/lib/finance-data";
 import type { AuthUser } from "@/lib/types";
 import Icon from "@/components/Icon";
 import LoginModal from "@/components/auth/LoginModal";
+import InstallButton from "@/components/pwa/InstallButton";
 import styles from "./dashboard.module.css";
 
 function initials(name: string): string {
@@ -58,6 +59,8 @@ export default function TopBar({ user }: { user: AuthUser | null }) {
             );
           })}
         </div>
+
+        <InstallButton />
 
         {user ? (
           <>

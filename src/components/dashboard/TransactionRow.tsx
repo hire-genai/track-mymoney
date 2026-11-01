@@ -5,6 +5,7 @@ import { fmt } from "@/lib/finance-calc";
 import { useFinance } from "@/context/FinanceContext";
 import Icon from "@/components/Icon";
 import type { PersonId, Transaction } from "@/lib/types";
+import { extractMerchant } from "@/lib/merchant";
 import styles from "./dashboard.module.css";
 import CategoryPicker from "./CategoryPicker";
 
@@ -22,13 +23,24 @@ export default function TransactionRow({ tx, month, personId }: Props) {
   const credit = tx.type === "credit";
   const displayAmt = credit ? `+${fmt(tx.amount)}` : fmt(tx.amount);
   const shortCat = tx.category.length > 14 ? `${tx.category.slice(0, 12)}…` : tx.category;
+  const merchant = extractMerchant(tx.particulars);
+  const showRef =
+    tx.particulars.trim().length > 0 &&
+    merchant.toLowerCase() !== tx.particulars.trim().toLowerCase();
 
   return (
     <div className={styles.txRow}>
       <div className={styles.txLeft}>
-        <span className={styles.txName} title={tx.particulars}>
-          {tx.particulars}
-        </span>
+        <div className={styles.txNameCol}>
+          <span className={styles.txMerchant} title={tx.particulars}>
+            {merchant}
+          </span>
+          {showRef && (
+            <span className={styles.txRef} title={tx.particulars}>
+              {tx.particulars}
+            </span>
+          )}
+        </div>
         <span className={styles.txDate}>{tx.date}</span>
       </div>
       <div className={styles.txRight}>
