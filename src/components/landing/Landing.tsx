@@ -17,6 +17,7 @@ import {
   IconUpload,
   IconChart,
 } from "./icons";
+import InstallButton from "@/components/pwa/InstallButton";
 
 /* ─── Reveal-on-scroll (ENHANCEMENT only — content is visible by default) ─── */
 function useReveal() {
@@ -121,7 +122,7 @@ export default function Landing() {
               </svg>
               <span className={styles.brandLogoGlow} aria-hidden="true" />
             </div>
-            <span className={styles.brandName}>Track<em>MyMoney</em></span>
+            <span className={styles.brandName}>Track<em>-MyMoney</em></span>
           </Link>
 
           <nav className={styles.navLinks}>
@@ -132,9 +133,9 @@ export default function Landing() {
           </nav>
 
           <div className={styles.navActions}>
-            <Link href="/login" className={styles.navSignIn}>Sign in</Link>
+            <InstallButton />
             <Link href="/login" className={styles.navCta}>
-              <span>Start free</span>
+              <span>Sign in</span>
               <IconArrowRight size={13} />
             </Link>
           </div>
@@ -174,30 +175,12 @@ export default function Landing() {
             </p>
 
             <div className={styles.heroCtas}>
-              <Link href="/login" className={styles.ctaPrimary}>
-                <span className={styles.ctaPrimaryBg} />
-                <span className={styles.ctaPrimaryText}>
-                  Get started — free
-                  <IconArrowRight size={14} />
-                </span>
+              <Link href="/login" className={styles.ctaHeroSignIn}>
+                Sign in — it&apos;s free
+                <IconArrowRight size={14} />
               </Link>
-              <a href="#showcase" className={styles.ctaGhost}>
-                <span className={styles.ctaGhostDot} />
-                See it in action
-              </a>
             </div>
 
-            <div className={styles.heroProof}>
-              <div className={styles.proofAvatars}>
-                <div className={styles.proofAv} style={{ background: "linear-gradient(135deg,#10b981,#047857)" }}>M</div>
-                <div className={styles.proofAv} style={{ background: "linear-gradient(135deg,#4f46e5,#4338ca)" }}>K</div>
-                <div className={styles.proofAv} style={{ background: "linear-gradient(135deg,#9333ea,#7c3aed)" }}>A</div>
-                <div className={styles.proofAv} style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>+</div>
-              </div>
-              <div className={styles.proofText}>
-                <span>Trusted by couples &amp; serious savers worldwide</span>
-              </div>
-            </div>
           </div>
 
           {/* ── Hero visual ── */}
@@ -321,7 +304,7 @@ export default function Landing() {
                   <path d="M2 14 L6 6 L9 10 L13 3 L16 9" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
-              <span className={styles.brandName}>Track<em>MyMoney</em></span>
+              <span className={styles.brandName}>Track<em>-MyMoney</em></span>
             </div>
             <p className={styles.footerTag}>
               Budgeting built on your real bank statements.<br />Honest numbers, every month.
@@ -385,25 +368,24 @@ function WhySection() {
     <section id="why" className={styles.why}>
       <div className={styles.whyInner}>
         <div className={styles.whyLeft}>
-          <div className={styles.sectionEyebrow}>The real problem</div>
+          <div className={styles.sectionEyebrow}>Why Track-MyMoney</div>
           <h2 className={styles.sectionTitle}>
-            Most people don&apos;t have<br />
-            a <span className={styles.titleItalic}>spending</span> problem —<br />
-            they have a <span className={styles.heroGrad}>visibility</span> problem.
+            Your bank shows <span className={styles.titleItalic}>transactions</span>.<br />
+            We show you the <span className={styles.heroGrad}>whole story</span>.
           </h2>
           <p className={styles.whyBody}>
-            Money quietly leaves every month, and nobody can explain where it went.
-            That silence is what makes bills feel tight, savings feel impossible,
-            and financial conversations with partners feel uncomfortable.
+            Every month, thousands of rupees slip through small purchases, forgotten subscriptions,
+            and &ldquo;just this once&rdquo; dinners. You feel it in your balance, but you can&apos;t name it.
           </p>
           <p className={styles.whyBody}>
-            Track-MyMoney gives you the honest picture, automatically, every month —
-            so you can make decisions based on reality, not anxiety.
+            Track-MyMoney turns a raw bank statement into a clear, categorized picture in under
+            a minute — so you stop guessing, start deciding, and finally watch your savings grow
+            on purpose.
           </p>
           <Link href="/login" className={styles.ctaPrimary} style={{ marginTop: 32, display: "inline-flex" }}>
             <span className={styles.ctaPrimaryBg} />
             <span className={styles.ctaPrimaryText}>
-              See your picture
+              Start free in 60 seconds
               <IconArrowRight size={14} />
             </span>
           </Link>
@@ -411,10 +393,10 @@ function WhySection() {
 
         <div className={styles.whyRight}>
           {[
-            { heading: "Instant clarity", body: "Every transaction classified, totalled, and trended — month over month, person by person.", color: "#10b981", icon: IconSparkles },
-            { heading: "Honest conversations", body: "Show both partners side-by-side. No blame, no surprises. Just the numbers in one shared place.", color: "#9333ea", icon: IconUsers },
-            { heading: "Goals that stick", body: "Set a goal — a trip, an emergency fund, a down payment. Each month's surplus moves it forward.", color: "#4f46e5", icon: IconTarget },
-            { heading: "Zero busywork", body: "No spreadsheets, no manual tagging. Drop your statement in — AI handles the rest in 60 seconds.", color: "#f59e0b", icon: IconZap },
+            { heading: "See where it really goes", body: "Groceries, rent, dining, subscriptions — every rupee landed in the right bucket, automatically.", color: "#10b981", icon: IconSparkles },
+            { heading: "Spend together, without the fights", body: "Couples mode shows both partners side-by-side. One honest view replaces every awkward money talk.", color: "#9333ea", icon: IconUsers },
+            { heading: "Save for what matters", body: "Pick a goal — a trip, a safety net, a first home. Watch each month&apos;s surplus push it forward.", color: "#4f46e5", icon: IconTarget },
+            { heading: "No spreadsheets, no tagging", body: "Drop a PDF or CSV. In 60 seconds you&apos;ll see trends your bank app has hidden from you for years.", color: "#f59e0b", icon: IconZap },
           ].map((c) => {
             const Icon = c.icon;
             return (

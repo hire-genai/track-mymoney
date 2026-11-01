@@ -1,0 +1,27 @@
+{
+  "name": "Track-MyMoney",
+  "short_name": "Track-MyMoney",
+  "description": "Couple-mode budgeting with goals, built on your real bank statements.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#047857",
+  "background_color": "#fafbfc",
+  "categories": ["finance", "productivity"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

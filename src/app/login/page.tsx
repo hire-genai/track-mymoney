@@ -28,7 +28,7 @@ export default async function LoginPage() {
                 <path d="M2 15L6 8L10 11L14 5L18 10" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <div className={styles.leftBrand}>Track<em>MyMoney</em></div>
+            <div className={styles.leftBrand}>Track<em>-MyMoney</em></div>
 
             <h2 className={styles.leftHeadline}>
               Know exactly where<br />every rupee goes.

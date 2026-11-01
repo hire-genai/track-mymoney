@@ -769,6 +769,40 @@
   min-width: 0;
 }
 
+.txNameCol {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.txMerchant {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.txRef {
+  font-size: 10.5px;
+  color: var(--fg-soft, #94a3b8);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  letter-spacing: 0.01em;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  opacity: 0.75;
+}
+
+.txRow:hover .txRef { opacity: 1; }
+
 .txDate {
   font-size: 10px;
   color: var(--fg-muted);
