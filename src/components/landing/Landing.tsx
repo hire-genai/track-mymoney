@@ -18,6 +18,7 @@ import {
   IconChart,
 } from "./icons";
 import InstallButton from "@/components/pwa/InstallButton";
+import ShareButton from "@/components/share/ShareButton";
 
 /* ─── Reveal-on-scroll (ENHANCEMENT only — content is visible by default) ─── */
 function useReveal() {
@@ -133,6 +134,7 @@ export default function Landing() {
           </nav>
 
           <div className={styles.navActions}>
+            <ShareButton />
             <InstallButton />
             <Link href="/login" className={styles.navCta}>
               <span>Sign in</span>
