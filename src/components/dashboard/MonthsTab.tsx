@@ -8,6 +8,7 @@ import Icon from "@/components/Icon";
 import KpiDashboard from "./KpiDashboard";
 import CategoryCard from "./CategoryCard";
 import InlineCoupleCompare from "./InlineCoupleCompare";
+import DownloadMenu from "./DownloadMenu";
 import styles from "./dashboard.module.css";
 
 export default function MonthsTab() {
@@ -50,6 +51,7 @@ export default function MonthsTab() {
             {m}
           </button>
         ))}
+        <DownloadMenu />
       </div>
 
       <KpiDashboard month={currentMonth} personId={activePerson} />
