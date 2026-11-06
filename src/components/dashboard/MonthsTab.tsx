@@ -9,6 +9,7 @@ import KpiDashboard from "./KpiDashboard";
 import CategoryCard from "./CategoryCard";
 import InlineCoupleCompare from "./InlineCoupleCompare";
 import DownloadMenu from "./DownloadMenu";
+import MonthSelector from "./MonthSelector";
 import styles from "./dashboard.module.css";
 
 export default function MonthsTab() {
@@ -41,16 +42,11 @@ export default function MonthsTab() {
   return (
     <div>
       <div className={styles.subtabBar}>
-        {visibleMonths.map((m) => (
-          <button
-            key={m}
-            type="button"
-            className={`${styles.subtabBtn} ${currentMonth === m ? styles.subtabBtnActive : ""}`}
-            onClick={() => setCurrentMonth(m)}
-          >
-            {m}
-          </button>
-        ))}
+        <MonthSelector
+          months={visibleMonths}
+          current={currentMonth}
+          onChange={setCurrentMonth}
+        />
         <DownloadMenu />
       </div>
 

@@ -6,22 +6,9 @@ import { PEOPLE } from "@/lib/finance-data";
 import type { PersonId, Transaction } from "@/lib/types";
 import styles from "./dashboard.module.css";
 
-type Range = "current" | "last2" | "last3" | "last6" | "all";
+type Mode = "current" | "custom";
 type Format = "csv" | "json";
 type Scope = "me" | "both";
-
-interface RangeOpt {
-  key: Range;
-  label: string;
-}
-
-const RANGE_OPTIONS: RangeOpt[] = [
-  { key: "current", label: "This month" },
-  { key: "last2", label: "Last 2 months" },
-  { key: "last3", label: "Last 3 months" },
-  { key: "last6", label: "Last 6 months" },
-  { key: "all", label: "All data" },
-];
 
 function csvEscape(v: string | number): string {
   const s = String(v ?? "");
@@ -34,14 +21,26 @@ function monthsNewestFirst(months: string[]): string[] {
   return [...months].sort((a, b) => new Date(`1 ${b}`).getTime() - new Date(`1 ${a}`).getTime());
 }
 
-function selectMonths(allMonths: string[], current: string, range: Range): string[] {
-  const sorted = monthsNewestFirst(allMonths);
-  if (range === "all") return sorted;
-  if (range === "current") return [current];
-  const take = range === "last2" ? 2 : range === "last3" ? 3 : 6;
-  const idx = sorted.indexOf(current);
-  const start = idx === -1 ? 0 : idx;
-  return sorted.slice(start, start + take);
+/** "Oct 2026" → "2026-10" (for <input type="month">). */
+function monthLabelToInput(m: string): string {
+  const d = new Date(`1 ${m}`);
+  if (Number.isNaN(d.getTime())) return "";
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}`;
+}
+
+/** "2026-10" → numeric key 202610 for range comparison. */
+function inputKey(ym: string): number | null {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return null;
+  return y * 100 + m;
+}
+
+/** "Oct 2026" → 202610. */
+function monthKey(label: string): number | null {
+  const d = new Date(`1 ${label}`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getFullYear() * 100 + (d.getMonth() + 1);
 }
 
 function slugify(s: string): string {
@@ -86,7 +85,57 @@ function collectRows(
   return rows;
 }
 
-function toCsv(rows: Row[]): string {
+interface Totals {
+  income: number;
+  fixed: number;
+  investments: number;
+  savings: number;
+  guiltFree: number;
+  netFlow: number;
+  byCategory: Record<string, number>;
+}
+
+function computeTotals(rows: Row[]): Totals {
+  const t: Totals = {
+    income: 0,
+    fixed: 0,
+    investments: 0,
+    savings: 0,
+    guiltFree: 0,
+    netFlow: 0,
+    byCategory: {},
+  };
+  for (const r of rows) {
+    const signed = r.type === "credit" ? r.amount : -r.amount;
+    t.netFlow += signed;
+    t.byCategory[r.category] = (t.byCategory[r.category] ?? 0) + r.amount;
+    switch (r.primaryCategory) {
+      case "Income":
+        t.income += r.amount;
+        break;
+      case "Fixed":
+        t.fixed += r.amount;
+        break;
+      case "Investments":
+        t.investments += r.amount;
+        break;
+      case "Savings":
+        t.savings += r.amount;
+        break;
+      case "Guilt-Free":
+        t.guiltFree += r.amount;
+        break;
+    }
+  }
+  return t;
+}
+
+function toCsv(rows: Row[], meta: { rangeLabel: string; totals: Totals }): string {
+  const lines: string[] = [];
+  lines.push(`# Track-MyMoney export — ${meta.rangeLabel}`);
+  lines.push(
+    `# totals: income=${meta.totals.income} fixed=${meta.totals.fixed} investments=${meta.totals.investments} savings=${meta.totals.savings} guilt_free=${meta.totals.guiltFree} net_flow=${meta.totals.netFlow}`,
+  );
   const header = [
     "person",
     "month",
@@ -97,7 +146,7 @@ function toCsv(rows: Row[]): string {
     "category",
     "primary_category",
   ];
-  const lines = [header.join(",")];
+  lines.push(header.join(","));
   for (const r of rows) {
     lines.push(
       [
@@ -115,12 +164,20 @@ function toCsv(rows: Row[]): string {
   return lines.join("\r\n");
 }
 
-function toJson(rows: Row[], months: string[]): string {
+function toJson(
+  rows: Row[],
+  months: string[],
+  meta: { rangeLabel: string; from?: string; to?: string; totals: Totals },
+): string {
   return JSON.stringify(
     {
       app: "Track-MyMoney",
       exportedAt: new Date().toISOString(),
+      range: meta.rangeLabel,
+      from: meta.from,
+      to: meta.to,
       months,
+      totals: meta.totals,
       rowCount: rows.length,
       transactions: rows,
     },
@@ -144,9 +201,11 @@ function download(filename: string, content: string, mime: string) {
 export default function DownloadMenu() {
   const { txns, activePerson, currentMonth, bothUploaded } = useFinance();
   const [open, setOpen] = useState(false);
-  const [range, setRange] = useState<Range>("current");
+  const [mode, setMode] = useState<Mode>("current");
   const [format, setFormat] = useState<Format>("csv");
   const [scope, setScope] = useState<Scope>("me");
+  const [fromYM, setFromYM] = useState<string>(() => monthLabelToInput(currentMonth));
+  const [toYM, setToYM] = useState<string>(() => monthLabelToInput(currentMonth));
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -173,10 +232,20 @@ export default function DownloadMenu() {
     return Array.from(s);
   }, [txns]);
 
-  const months = useMemo(
-    () => selectMonths(allMonths, currentMonth, range),
-    [allMonths, currentMonth, range],
-  );
+  const fromKey = inputKey(fromYM);
+  const toKey = inputKey(toYM);
+  const rangeInvalid = mode === "custom" && (!fromKey || !toKey || fromKey > toKey);
+
+  const months = useMemo(() => {
+    if (mode === "current") return [currentMonth];
+    if (rangeInvalid || fromKey == null || toKey == null) return [];
+    return monthsNewestFirst(
+      allMonths.filter((m) => {
+        const k = monthKey(m);
+        return k != null && k >= fromKey && k <= toKey;
+      }),
+    );
+  }, [mode, currentMonth, allMonths, fromKey, toKey, rangeInvalid]);
 
   const people = useMemo<PersonId[]>(
     () => (bothUploaded && scope === "both" ? ["A", "B"] : [activePerson]),
@@ -192,28 +261,36 @@ export default function DownloadMenu() {
     return n;
   }, [txns, people, months]);
 
+  const rangeLabel =
+    mode === "current"
+      ? currentMonth
+      : fromYM && toYM
+        ? fromYM === toYM
+          ? fromYM
+          : `${fromYM} to ${toYM}`
+        : "custom";
+
   const run = () => {
+    if (rangeInvalid) return;
     const rows = collectRows(txns, people, months);
     if (rows.length === 0) return;
+    const totals = computeTotals(rows);
     const stamp = new Date().toISOString().slice(0, 10);
     const scopeTag =
-      people.length === 2
-        ? "both"
-        : slugify(PEOPLE[people[0]]?.name ?? people[0]);
+      people.length === 2 ? "both" : slugify(PEOPLE[people[0]]?.name ?? people[0]);
     const rangeTag =
-      range === "current"
-        ? slugify(currentMonth)
-        : range === "all"
-          ? "all"
-          : range;
+      mode === "current" ? slugify(currentMonth) : `${fromYM}_to_${toYM}`;
     const base = `track-mymoney_${scopeTag}_${rangeTag}_${stamp}`;
+    const meta = { rangeLabel, from: mode === "custom" ? fromYM : undefined, to: mode === "custom" ? toYM : undefined, totals };
     if (format === "csv") {
-      download(`${base}.csv`, toCsv(rows), "text/csv;charset=utf-8");
+      download(`${base}.csv`, toCsv(rows, meta), "text/csv;charset=utf-8");
     } else {
-      download(`${base}.json`, toJson(rows, months), "application/json;charset=utf-8");
+      download(`${base}.json`, toJson(rows, months, meta), "application/json;charset=utf-8");
     }
     setOpen(false);
   };
+
+  const disabled = previewCount === 0 || rangeInvalid;
 
   return (
     <div className={styles.dlWrap} ref={wrapRef}>
@@ -244,17 +321,48 @@ export default function DownloadMenu() {
           <div className={styles.dlGroup}>
             <div className={styles.dlLabel}>Range</div>
             <div className={styles.dlPills}>
-              {RANGE_OPTIONS.map((o) => (
-                <button
-                  key={o.key}
-                  type="button"
-                  className={`${styles.dlPill} ${range === o.key ? styles.dlPillActive : ""}`}
-                  onClick={() => setRange(o.key)}
-                >
-                  {o.label}
-                </button>
-              ))}
+              <button
+                type="button"
+                className={`${styles.dlPill} ${mode === "current" ? styles.dlPillActive : ""}`}
+                onClick={() => setMode("current")}
+              >
+                Selected month ({currentMonth})
+              </button>
+              <button
+                type="button"
+                className={`${styles.dlPill} ${mode === "custom" ? styles.dlPillActive : ""}`}
+                onClick={() => setMode("custom")}
+              >
+                Custom range
+              </button>
             </div>
+            {mode === "custom" && (
+              <div className={styles.dlRange}>
+                <label className={styles.dlRangeField}>
+                  <span>From</span>
+                  <input
+                    type="month"
+                    value={fromYM}
+                    max={toYM || undefined}
+                    onChange={(e) => setFromYM(e.target.value)}
+                    className={styles.dlRangeInput}
+                  />
+                </label>
+                <label className={styles.dlRangeField}>
+                  <span>To</span>
+                  <input
+                    type="month"
+                    value={toYM}
+                    min={fromYM || undefined}
+                    onChange={(e) => setToYM(e.target.value)}
+                    className={styles.dlRangeInput}
+                  />
+                </label>
+                {rangeInvalid && (
+                  <div className={styles.dlError}>From date must be on or before To date.</div>
+                )}
+              </div>
+            )}
           </div>
 
           {bothUploaded && (
@@ -307,9 +415,9 @@ export default function DownloadMenu() {
               type="button"
               className={styles.dlDownload}
               onClick={run}
-              disabled={previewCount === 0}
+              disabled={disabled}
             >
-              Download
+              Download Report
             </button>
           </div>
         </div>
