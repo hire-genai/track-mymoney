@@ -279,6 +279,9 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* ═══ CTA (moved to top) ═══ */}
+      <FinalCta />
+
       {/* ═══ WHY ═══ */}
       <WhySection />
 
@@ -292,9 +295,6 @@ export default function Landing() {
       <HowSection />
 
       {/* ═══ TESTIMONIALS ═══ */}
-
-      {/* ═══ CTA ═══ */}
-      <FinalCta />
 
       {/* ═══ FOOTER ═══ */}
       <footer className={styles.footer}>
