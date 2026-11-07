@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./login.module.css";
 
-type Step = "email" | "code";
+type Step = "email" | "name" | "code";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -22,6 +22,34 @@ export default function LoginForm() {
     const id = setTimeout(() => setResendIn((n) => n - 1), 1000);
     return () => clearTimeout(id);
   }, [resendIn]);
+
+  async function checkEmail(e?: React.FormEvent) {
+    e?.preventDefault();
+    setError(null);
+    setInfo(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; exists?: boolean };
+      if (!res.ok) {
+        setError(data.error || "Could not check this email. Try again.");
+        return;
+      }
+      if (data.exists) {
+        await sendOtp();
+      } else {
+        setStep("name");
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function sendOtp(e?: React.FormEvent) {
     e?.preventDefault();
@@ -75,16 +103,7 @@ export default function LoginForm() {
 
   if (step === "email") {
     return (
-      <form className={styles.form} onSubmit={sendOtp}>
-        <label className={styles.label}>Full name</label>
-        <input
-          className={styles.input}
-          type="text"
-          placeholder="e.g. Dheeraj Yadav"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoComplete="name"
-        />
+      <form className={styles.form} onSubmit={checkEmail}>
         <label className={styles.label}>Email address</label>
         <input
           className={styles.input}
@@ -101,6 +120,47 @@ export default function LoginForm() {
           type="submit"
           className={styles.primary}
           disabled={loading || !email}
+        >
+          {loading ? "Checking…" : "Continue"}
+        </button>
+      </form>
+    );
+  }
+
+  if (step === "name") {
+    return (
+      <form className={styles.form} onSubmit={sendOtp}>
+        <div className={styles.returnChip}>
+          <span>{email}</span>
+          <button
+            type="button"
+            className={styles.linkBtn}
+            onClick={() => {
+              setStep("email");
+              setName("");
+              setError(null);
+              setInfo(null);
+            }}
+          >
+            Change
+          </button>
+        </div>
+        <label className={styles.label}>Your name</label>
+        <input
+          className={styles.input}
+          type="text"
+          placeholder="e.g. Dheeraj Yadav"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="name"
+          required
+          autoFocus
+        />
+        {error && <div className={styles.error}>{error}</div>}
+        <button
+          type="submit"
+          className={styles.primary}
+          disabled={loading || !name.trim()}
         >
           {loading ? "Sending…" : "Send verification code"}
         </button>

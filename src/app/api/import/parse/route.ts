@@ -101,12 +101,14 @@ export async function POST(request: Request) {
   }
 
   const tExtract = performance.now();
+  console.log(`[import/parse] ${id} 📄 extracted PDF text in ${(tExtract - t0).toFixed(0)}ms (chars=${text.length}, pages=${totalPages ?? "n/a"})`);
   debug.push(`[route] extracted in ${(tExtract - t0).toFixed(0)}ms`);
 
   const result = isCsv ? parseCsvText(text) : parseStatementText(text);
   debug.push(...result.debug);
 
   const tParse = performance.now();
+  console.log(`[import/parse] ${id} 🔍 regex parsed ${result.transactions.length} transactions in ${(tParse - tExtract).toFixed(0)}ms`);
   debug.push(`[route] parsed in ${(tParse - tExtract).toFixed(0)}ms`);
   debug.push(`[route] regex gave ${result.transactions.length} transactions`);
 
@@ -117,12 +119,21 @@ export async function POST(request: Request) {
     type: t.type,
   }));
   const aiResults = await aiCategorize(aiInput, debug);
+  let aiRows = 0;
+  let fallbackRows = 0;
   for (let i = 0; i < result.transactions.length; i++) {
-    if (aiResults[i]) result.transactions[i].category = aiResults[i].category;
+    const r = aiResults[i];
+    if (!r) continue;
+    result.transactions[i].category = r.category;
+    if (r.fallback) fallbackRows++;
+    else aiRows++;
   }
 
   const tAi = performance.now();
-  debug.push(`[route] categorized in ${(tAi - tParse).toFixed(0)}ms`);
+  console.log(
+    `[import/parse] ${id} 🏁 categorized in ${(tAi - tParse).toFixed(0)}ms (${aiRows} via Nemotron, ${fallbackRows} via keyword fallback), grand total ${(tAi - t0).toFixed(0)}ms for ${result.transactions.length} txns`,
+  );
+  debug.push(`[route] categorized in ${(tAi - tParse).toFixed(0)}ms (${aiRows} via Nemotron, ${fallbackRows} via keyword fallback)`);
   debug.push(`[route] total ${(tAi - t0).toFixed(0)}ms, ${result.transactions.length} transactions`);
 
   for (const d of debug) console.log(`[import/parse] ${id} ${d}`);
@@ -141,6 +152,8 @@ export async function POST(request: Request) {
       total: result.transactions.length,
       credit: result.transactions.filter((t) => t.type === "credit").length,
       debit: result.transactions.filter((t) => t.type === "debit").length,
+      aiCategorized: aiRows,
+      keywordFallback: fallbackRows,
     },
     timings: {
       extractMs: Math.round(tExtract - t0),
